@@ -1,15 +1,20 @@
 use std::{
     env,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Command, Stdio},
     thread,
     time::Duration,
 };
 
+#[cfg(target_os = "macos")]
+use std::path::Path;
+
 use ai_rpa_core::{AdapterStatus, ControlMode, Provider, adapter::provider_capabilities};
 #[cfg(not(target_os = "macos"))]
 use anyhow::Context;
-use anyhow::{Result, bail};
+use anyhow::Result;
+#[cfg(target_os = "macos")]
+use anyhow::bail;
 use chrono::Utc;
 
 use crate::hook_install;

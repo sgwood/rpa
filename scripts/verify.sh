@@ -1,17 +1,25 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 set -euo pipefail
 
-REPOSITORY_ROOT="${0:A:h:h}"
-CARGO_BIN="${CARGO_BIN:-$HOME/.cargo/bin/cargo}"
-NODE_24="${NODE_24:-$HOME/.nvm/versions/node/v24.12.0/bin/node}"
-NPM_CLI="${NPM_CLI:-$HOME/.nvm/versions/node/v24.12.0/lib/node_modules/npm/bin/npm-cli.js}"
-NODE_BIN_DIR="${NODE_24:h}"
+REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+for required_command in cargo node npm; do
+  if ! command -v "$required_command" >/dev/null 2>&1; then
+    echo "Required command '$required_command' was not found in PATH." >&2
+    exit 1
+  fi
+done
+
+node_major="$(node -p "process.versions.node.split('.')[0]")"
+if ((node_major < 24)); then
+  echo "Node.js 24 or newer is required; found $(node --version)." >&2
+  exit 1
+fi
 
 cd "$REPOSITORY_ROOT"
-"$CARGO_BIN" fmt --all -- --check
-"$CARGO_BIN" clippy --workspace --all-targets -- -D warnings
-"$CARGO_BIN" test --workspace --no-fail-fast
-cd "$REPOSITORY_ROOT/apps/desktop"
-env PATH="$NODE_BIN_DIR:/usr/local/bin:/usr/bin:/bin" "$NODE_24" "$NPM_CLI" ci
-env PATH="$NODE_BIN_DIR:/usr/local/bin:/usr/bin:/bin" "$NODE_24" "$NPM_CLI" test
-env PATH="$NODE_BIN_DIR:/usr/local/bin:/usr/bin:/bin" "$NODE_24" "$NPM_CLI" run build
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --no-fail-fast
+npm --prefix apps/desktop ci
+npm --prefix apps/desktop test
+npm --prefix apps/desktop run build

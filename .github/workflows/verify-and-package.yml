@@ -1,10 +1,18 @@
-name: verify-and-package
+name: Verify and package
 
 on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   verify:
@@ -19,6 +27,7 @@ jobs:
         with:
           toolchain: 1.98.0
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: 24.12.0
@@ -44,3 +53,4 @@ jobs:
           name: ai-rpa-${{ matrix.os }}
           path: target/release/bundle/**
           if-no-files-found: error
+          retention-days: 7

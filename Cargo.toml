@@ -12,7 +12,7 @@ repository = "https://github.com/sgwood/rpa"
 aes-gcm = "0.10"
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 directories = "6"

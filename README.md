@@ -97,9 +97,19 @@ npm --prefix apps/desktop run build
 
 ### 打包
 
+macOS：
+
 ```bash
-npm --prefix apps/desktop run tauri build
+npm --prefix apps/desktop run tauri build -- --bundles app,dmg
 ```
+
+Windows（推荐 NSIS，不依赖已弃用的 VBSCRIPT 可选功能）：
+
+```powershell
+npm --prefix apps/desktop run tauri build -- --bundles nsis
+```
+
+企业 MSI 仍可通过 `--bundles msi` 构建，但构建机必须启用 Windows VBSCRIPT 可选功能。
 
 macOS 安装脚本和 Windows PowerShell 安装脚本分别位于 `scripts/install-macos.sh` 与 `scripts/install-windows.ps1`。
 

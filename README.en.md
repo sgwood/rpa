@@ -43,6 +43,8 @@ Run the complete local verification suite:
 
 On Windows PowerShell, run `.\scripts\verify.ps1` instead.
 
+Build native installers with `npm --prefix apps/desktop run tauri build -- --bundles app,dmg` on macOS or `npm --prefix apps/desktop run tauri build -- --bundles nsis` on Windows. MSI builds require the deprecated Windows VBSCRIPT optional feature.
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a change. Security issues must be reported privately according to [SECURITY.md](SECURITY.md).
 
 ## Project status

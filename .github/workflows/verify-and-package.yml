@@ -19,7 +19,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, windows-2025]
+        include:
+          - os: macos-15
+            bundles: app,dmg
+          - os: windows-2025
+            bundles: nsis
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +51,7 @@ jobs:
         run: npm test
       - name: Build native bundle
         working-directory: apps/desktop
-        run: npm run tauri build
+        run: npm run tauri build -- --bundles ${{ matrix.bundles }}
       - uses: actions/upload-artifact@v4
         with:
           name: ai-rpa-${{ matrix.os }}

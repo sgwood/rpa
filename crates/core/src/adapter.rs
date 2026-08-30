@@ -65,7 +65,7 @@ pub fn normalize_event(
     let title = input
         .title
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| format!("{} task", input.provider));
+        .unwrap_or_else(|| fallback_title(input.provider, input.workspace.as_deref()));
     let event_id = input.event_id.unwrap_or_else(Uuid::new_v4);
     let idempotency_key = input.idempotency_key.unwrap_or_else(|| {
         let mut hasher = Sha256::new();
@@ -106,6 +106,19 @@ pub fn normalize_event(
     })
 }
 
+fn fallback_title(provider: Provider, workspace: Option<&str>) -> String {
+    let workspace_name = workspace
+        .map(str::trim)
+        .map(|value| value.trim_end_matches(['/', '\\']))
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.rsplit(['/', '\\']).next())
+        .filter(|value| !value.is_empty());
+    workspace_name.map_or_else(
+        || format!("{} task", provider),
+        |name| format!("{} · {name}", provider),
+    )
+}
+
 pub fn map_event_type(provider: Provider, raw: &str) -> EventType {
     let normalized = raw
         .trim()
@@ -118,7 +131,8 @@ pub fn map_event_type(provider: Provider, raw: &str) -> EventType {
     if normalized.contains("cancel") || normalized.contains("interrupt") {
         return EventType::Cancelled;
     }
-    if normalized.contains("permission")
+    if normalized == "waitinguser"
+        || normalized.contains("permission")
         || normalized.contains("approval")
         || normalized.contains("login")
         || normalized.contains("wait_user")
@@ -301,6 +315,14 @@ mod tests {
     }
 
     #[test]
+    fn maps_hook_waiting_user_camel_case() {
+        assert_eq!(
+            map_event_type(Provider::Claude, "WaitingUser"),
+            EventType::WaitingUser
+        );
+    }
+
+    #[test]
     fn stop_alone_is_only_e1() {
         let event = normalize_event(input(Provider::Codex, "stop"), "device-1").unwrap();
         assert_eq!(event.evidence_level, EvidenceLevel::E1);
@@ -354,6 +376,23 @@ mod tests {
         assert_eq!(
             provider_hook_response(Provider::Cursor, &delivery)["followup_message"],
             "next"
+        );
+    }
+
+    #[test]
+    fn unnamed_task_uses_workspace_name_without_using_prompt_content() {
+        let mut raw = input(Provider::Cursor, "session_start");
+        raw.title = None;
+        raw.workspace = Some(r"C:\work\ai-console".to_owned());
+        raw.payload = json!({"prompt":"private prompt"});
+
+        let event = normalize_event(raw, "device-1").unwrap();
+
+        assert_eq!(event.title, "cursor · ai-console");
+        assert!(
+            !serde_json::to_string(&event)
+                .unwrap()
+                .contains("private prompt")
         );
     }
 }

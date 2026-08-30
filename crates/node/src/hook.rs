@@ -45,7 +45,20 @@ pub fn to_raw_event(
         &payload,
         &["turn_id", "turnId", "agent_run_id", "agentRunId"],
     );
-    let title = first_string(&payload, &["title", "task_title", "taskTitle"]);
+    let title = first_string(
+        &payload,
+        &[
+            "title",
+            "task_title",
+            "taskTitle",
+            "session_name",
+            "sessionName",
+            "conversation_name",
+            "conversationName",
+            "thread_name",
+            "threadName",
+        ],
+    );
     let workspace = first_string(&payload, &["cwd", "workspace", "workspacePath"]);
     let project = first_string(&payload, &["project", "projectName"]);
     let managed = payload
@@ -319,6 +332,36 @@ mod tests {
         assert!(!encoded.contains("private answer"));
         assert!(!encoded.contains("private.jsonl"));
         assert_eq!(raw.payload["model"], "gpt-test");
+    }
+
+    #[test]
+    fn uses_explicit_session_name_but_never_prompt_as_task_title() {
+        let named = to_raw_event(
+            Provider::Claude,
+            "SessionStart",
+            None,
+            json!({
+                "session_id":"named-session",
+                "session_name":"依赖升级",
+                "prompt":"private prompt"
+            }),
+        )
+        .unwrap();
+        assert_eq!(named.title.as_deref(), Some("依赖升级"));
+
+        let unnamed = to_raw_event(
+            Provider::Codex,
+            "SessionStart",
+            None,
+            json!({"session_id":"unnamed-session","prompt":"private prompt"}),
+        )
+        .unwrap();
+        assert!(unnamed.title.is_none());
+        assert!(
+            !serde_json::to_string(&unnamed)
+                .unwrap()
+                .contains("private prompt")
+        );
     }
 
     #[test]

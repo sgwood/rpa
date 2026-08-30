@@ -54,6 +54,31 @@ export interface Task {
   stateVersion: number;
 }
 
+export interface LiveTask extends Task {
+  source: "HOOK_EVENT";
+  stale: boolean;
+  ageSeconds: number;
+}
+
+export interface LiveProvider {
+  provider: Provider;
+  connectionState: string;
+  trackingState: string;
+  activeTaskCount: number;
+  lastEventAt?: string;
+}
+
+export interface LiveOverview {
+  observedAt: string;
+  pollIntervalMs: number;
+  connectedProviderCount: number;
+  monitoredProviderCount: number;
+  executingTaskCount: number;
+  waitingTaskCount: number;
+  providers: LiveProvider[];
+  tasks: LiveTask[];
+}
+
 export interface TimelineEvent {
   eventId: string;
   eventType: string;
@@ -96,6 +121,7 @@ export interface Dashboard {
   p95DurationMs?: number;
   devices: Device[];
   adapters: Adapter[];
+  live: LiveOverview;
   attention: Task[];
   recent: Task[];
 }

@@ -1,8 +1,8 @@
 use std::{collections::BTreeMap, time::Duration};
 
 use ai_rpa_core::{
-    AdapterStatus, CommandAction, CommandState, RawEventInput, TaskState, normalize_event,
-    provider_hook_response,
+    AdapterStatus, CommandAction, CommandState, Provider, RawEventInput, TaskRecord, TaskState,
+    normalize_event, provider_hook_response,
 };
 use ai_rpa_store::TaskFilter;
 use axum::{
@@ -12,7 +12,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tower_http::{cors::CorsLayer, services::ServeDir, trace::TraceLayer};
@@ -283,8 +283,121 @@ struct Dashboard {
     p95_duration_ms: Option<i64>,
     devices: Vec<ai_rpa_core::DeviceRecord>,
     adapters: Vec<AdapterStatus>,
+    live: LiveOverview,
     attention: Vec<ai_rpa_core::TaskRecord>,
     recent: Vec<ai_rpa_core::TaskRecord>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveOverview {
+    observed_at: DateTime<Utc>,
+    poll_interval_ms: u64,
+    connected_provider_count: usize,
+    monitored_provider_count: usize,
+    executing_task_count: usize,
+    waiting_task_count: usize,
+    providers: Vec<LiveProviderSummary>,
+    tasks: Vec<LiveTaskSummary>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveProviderSummary {
+    provider: Provider,
+    connection_state: String,
+    tracking_state: String,
+    active_task_count: usize,
+    last_event_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveTaskSummary {
+    #[serde(flatten)]
+    task: TaskRecord,
+    source: &'static str,
+    stale: bool,
+    age_seconds: i64,
+}
+
+const LIVE_POLL_INTERVAL_MS: u64 = 2_000;
+const LIVE_EVENT_FRESHNESS_SECONDS: i64 = 300;
+
+fn build_live_overview(
+    adapters: &[AdapterStatus],
+    tasks: &[TaskRecord],
+    observed_at: DateTime<Utc>,
+) -> LiveOverview {
+    let active: Vec<_> = tasks
+        .iter()
+        .filter(|task| matches!(task.state, TaskState::Running | TaskState::WaitingUser))
+        .collect();
+    let providers = adapters
+        .iter()
+        .map(|adapter| {
+            let active_task_count = active
+                .iter()
+                .filter(|task| task.provider == adapter.provider)
+                .count();
+            let tracking_state = if adapter.install_state != "RUNNING" {
+                "OFFLINE"
+            } else if !matches!(adapter.hook_state.as_str(), "CONFIGURED" | "HEALTHY") {
+                "NOT_CONFIGURED"
+            } else if active_task_count > 0
+                || adapter.last_event_at.is_some_and(|last_event| {
+                    (observed_at - last_event).num_seconds() <= LIVE_EVENT_FRESHNESS_SECONDS
+                })
+            {
+                "LIVE"
+            } else if adapter.last_event_at.is_some() {
+                "STALE"
+            } else {
+                "READY"
+            };
+            LiveProviderSummary {
+                provider: adapter.provider,
+                connection_state: adapter.install_state.clone(),
+                tracking_state: tracking_state.to_owned(),
+                active_task_count,
+                last_event_at: adapter.last_event_at,
+            }
+        })
+        .collect();
+    let live_tasks = active
+        .iter()
+        .map(|task| {
+            let age_seconds = (observed_at - task.updated_at).num_seconds().max(0);
+            LiveTaskSummary {
+                task: (*task).clone(),
+                source: "HOOK_EVENT",
+                stale: age_seconds > LIVE_EVENT_FRESHNESS_SECONDS,
+                age_seconds,
+            }
+        })
+        .collect();
+    LiveOverview {
+        observed_at,
+        poll_interval_ms: LIVE_POLL_INTERVAL_MS,
+        connected_provider_count: adapters
+            .iter()
+            .filter(|adapter| adapter.install_state == "RUNNING")
+            .count(),
+        monitored_provider_count: adapters
+            .iter()
+            .filter(|adapter| matches!(adapter.hook_state.as_str(), "CONFIGURED" | "HEALTHY"))
+            .count(),
+        executing_task_count: active
+            .iter()
+            .filter(|task| task.state == TaskState::Running)
+            .count(),
+        waiting_task_count: active
+            .iter()
+            .filter(|task| task.state == TaskState::WaitingUser)
+            .count(),
+        providers,
+        tasks: live_tasks,
+    }
 }
 
 async fn dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
@@ -330,12 +443,18 @@ async fn dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiErro
         .take(10)
         .cloned()
         .collect();
+    let adapters = match state.store.adapters()? {
+        cached if !cached.is_empty() => cached,
+        _ => discovery::refresh(&state.store)?,
+    };
+    let live = build_live_overview(&adapters, &all, Utc::now());
     Ok(Json(serde_json::to_value(Dashboard {
         counts,
         completion_rate_24h,
         p95_duration_ms,
         devices: state.store.devices()?,
-        adapters: discovery::refresh(&state.store)?,
+        adapters,
+        live,
         attention,
         recent: all.into_iter().take(10).collect(),
     })?))
@@ -379,9 +498,10 @@ pub async fn background_tasks(state: AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ai_rpa_core::{Capability, ControlMode, EventType, EvidenceLevel};
     use ai_rpa_store::{CryptoBox, Store};
     use axum::{body::Body, http::Request};
-    use chrono::Utc;
+    use chrono::{TimeZone, Utc};
     use tempfile::TempDir;
     use tower::ServiceExt;
 
@@ -427,6 +547,82 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn live_overview_counts_connected_tools_and_active_tasks() {
+        let now = Utc.with_ymd_and_hms(2026, 8, 30, 12, 0, 0).unwrap();
+        let adapters = [
+            AdapterStatus {
+                provider: Provider::Codex,
+                install_state: "RUNNING".to_owned(),
+                executable: None,
+                version: None,
+                hook_state: "HEALTHY".to_owned(),
+                last_event_at: Some(now - chrono::Duration::seconds(20)),
+                capabilities: vec![Capability::SendNext],
+                message: "healthy".to_owned(),
+            },
+            AdapterStatus {
+                provider: Provider::Claude,
+                install_state: "RUNNING".to_owned(),
+                executable: None,
+                version: None,
+                hook_state: "CONFIGURED".to_owned(),
+                last_event_at: None,
+                capabilities: vec![Capability::SendNext],
+                message: "ready".to_owned(),
+            },
+            AdapterStatus {
+                provider: Provider::Cursor,
+                install_state: "INSTALLED_NOT_RUNNING".to_owned(),
+                executable: None,
+                version: None,
+                hook_state: "CONFIGURED".to_owned(),
+                last_event_at: None,
+                capabilities: vec![Capability::SendNext],
+                message: "offline".to_owned(),
+            },
+        ];
+        let task = |provider, state, title: &str, age| TaskRecord {
+            id: Uuid::new_v4(),
+            provider,
+            device_id: "device-test".to_owned(),
+            session_id: Uuid::new_v4().to_string(),
+            title: title.to_owned(),
+            workspace: None,
+            project: None,
+            control_mode: ControlMode::Observed,
+            capabilities: vec![Capability::SendNext],
+            state,
+            confidence: "MEDIUM".to_owned(),
+            required_evidence_level: EvidenceLevel::E2,
+            evidence_level: EvidenceLevel::E1,
+            evidence_summary: None,
+            started_at: Some(now - chrono::Duration::minutes(10)),
+            updated_at: now - chrono::Duration::seconds(age),
+            duration_ms: None,
+            last_event_type: EventType::TurnStarted,
+            state_version: 1,
+        };
+        let tasks = [
+            task(Provider::Codex, TaskState::Running, "编码任务", 30),
+            task(Provider::Claude, TaskState::WaitingUser, "等待批准", 600),
+            task(Provider::Cursor, TaskState::Succeeded, "已完成", 10),
+        ];
+
+        let overview = build_live_overview(&adapters, &tasks, now);
+
+        assert_eq!(overview.connected_provider_count, 2);
+        assert_eq!(overview.monitored_provider_count, 3);
+        assert_eq!(overview.executing_task_count, 1);
+        assert_eq!(overview.waiting_task_count, 1);
+        assert_eq!(overview.tasks.len(), 2);
+        assert!(!overview.tasks[0].stale);
+        assert!(overview.tasks[1].stale);
+        assert_eq!(overview.providers[0].tracking_state, "LIVE");
+        assert_eq!(overview.providers[1].tracking_state, "LIVE");
+        assert_eq!(overview.providers[2].tracking_state, "OFFLINE");
     }
 
     #[tokio::test]

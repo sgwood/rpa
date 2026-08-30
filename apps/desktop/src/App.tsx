@@ -31,6 +31,8 @@ import type {
   Adapter,
   Dashboard as DashboardData,
   Diagnostics as DiagnosticsData,
+  LiveProvider,
+  LiveTask,
   Task,
   TaskDetail as TaskDetailData,
   TaskState,
@@ -153,7 +155,7 @@ function EmptyState({ title, description }: { title: string; description: string
 
 function DashboardPage() {
   const loader = useCallback(() => api.dashboard(), []);
-  const { data, error, loading, refresh } = usePolling<DashboardData>(loader);
+  const { data, error, loading, refresh } = usePolling<DashboardData>(loader, 2_000);
   const cards: Array<[TaskState, string]> = [
     ["RUNNING", "正在执行"],
     ["WAITING_USER", "需要处理"],
@@ -168,6 +170,41 @@ function DashboardPage() {
         action={<button className="button" onClick={() => void refresh()}>刷新状态</button>}
       />
       <ErrorBanner message={error} retry={() => void refresh()} />
+      <section className="live-panel" aria-label="实时执行任务">
+        <div className="live-panel-header">
+          <div>
+            <span className="live-kicker"><i className="live-pulse" /> 实时监控</span>
+            <h2>连接电脑上的 AI 任务</h2>
+            <p>状态来自工具 Hook 事件；工具已打开不代表任务正在执行。</p>
+          </div>
+          <small>{data?.live ? `每 2 秒刷新 · ${timeAgo(data.live.observedAt)}` : "正在连接本机节点…"}</small>
+        </div>
+        <div className="live-summary" aria-label="实时统计">
+          <div><span>已连接工具</span><strong>{loading ? "—" : (data?.live.connectedProviderCount ?? 0)}</strong></div>
+          <div><span>已启用监控</span><strong>{loading ? "—" : (data?.live.monitoredProviderCount ?? 0)}</strong></div>
+          <div><span>正在执行</span><strong>{loading ? "—" : (data?.live.executingTaskCount ?? 0)}</strong></div>
+          <div><span>等待处理</span><strong>{loading ? "—" : (data?.live.waitingTaskCount ?? 0)}</strong></div>
+        </div>
+        <div className="live-provider-grid">
+          {(data?.live.providers ?? []).map((provider) => (
+            <LiveProviderCard provider={provider} key={provider.provider} />
+          ))}
+        </div>
+        <div className="live-task-list">
+          <div className="live-task-list-title">
+            <strong>活动任务</strong>
+            <span>{data?.live.tasks.length ?? 0} 个</span>
+          </div>
+          {data?.live.tasks.length ? (
+            data.live.tasks.map((task) => <LiveTaskRow key={task.id} task={task} />)
+          ) : !loading ? (
+            <EmptyState
+              title="当前没有已捕获的活动任务"
+              description={`已连接 ${data?.live.connectedProviderCount ?? 0} 个工具；新会话或下一次 Hook 事件后会自动出现。`}
+            />
+          ) : null}
+        </div>
+      </section>
       <section className="metric-grid" aria-label="状态统计">
         {cards.map(([state, description]) => (
           <article className="metric-card" key={state}>
@@ -206,6 +243,44 @@ function DashboardPage() {
         </Panel>
       </section>
     </AppShell>
+  );
+}
+
+const trackingStateMeta: Record<string, { label: string; tone: string }> = {
+  LIVE: { label: "实时", tone: "green" },
+  READY: { label: "等待首个事件", tone: "blue" },
+  STALE: { label: "状态待刷新", tone: "orange" },
+  NOT_CONFIGURED: { label: "未配置监控", tone: "orange" },
+  OFFLINE: { label: "未运行", tone: "gray" },
+};
+
+function LiveProviderCard({ provider }: { provider: LiveProvider }) {
+  const meta = trackingStateMeta[provider.trackingState] ?? { label: provider.trackingState, tone: "gray" };
+  return (
+    <article className="live-provider-card">
+      <span className={`provider-icon mini ${provider.provider.toLowerCase()}`}>{providerLabel[provider.provider].slice(0, 1)}</span>
+      <span>
+        <strong>{providerLabel[provider.provider]}</strong>
+        <small>{provider.activeTaskCount} 个活动任务</small>
+      </span>
+      <span className={`badge ${meta.tone}`}>{meta.label}</span>
+    </article>
+  );
+}
+
+function LiveTaskRow({ task }: { task: LiveTask }) {
+  return (
+    <NavLink className={`task-row live-task-row ${task.stale ? "stale" : ""}`} to={`/tasks/${task.id}`}>
+      <span className={`provider-icon mini ${task.provider.toLowerCase()}`}>{providerLabel[task.provider].slice(0, 1)}</span>
+      <span className="task-row-copy">
+        <strong>{task.title}</strong>
+        <small>{providerLabel[task.provider]} · Hook 事件 · {timeAgo(task.updatedAt)}</small>
+      </span>
+      <span className="live-task-status">
+        <StatusBadge state={task.state} />
+        {task.stale && <small>状态待刷新</small>}
+      </span>
+    </NavLink>
   );
 }
 

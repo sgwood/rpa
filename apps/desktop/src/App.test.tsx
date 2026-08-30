@@ -23,6 +23,58 @@ const dashboard = {
     capabilities: ["SEND_NEXT"],
     message: "healthy",
   }],
+  live: {
+    observedAt: new Date().toISOString(),
+    pollIntervalMs: 2_000,
+    connectedProviderCount: 2,
+    monitoredProviderCount: 2,
+    executingTaskCount: 1,
+    waitingTaskCount: 1,
+    providers: [
+      { provider: "CODEX", connectionState: "RUNNING", trackingState: "LIVE", activeTaskCount: 1 },
+      { provider: "CLAUDE", connectionState: "RUNNING", trackingState: "LIVE", activeTaskCount: 1 },
+    ],
+    tasks: [
+      {
+        id: "task-1",
+        provider: "CODEX",
+        deviceId: "dev-1",
+        sessionId: "session-1",
+        title: "分析 AI 任务汇总 RPA 可行性",
+        controlMode: "OBSERVED",
+        capabilities: ["SEND_NEXT"],
+        state: "RUNNING",
+        confidence: "MEDIUM",
+        requiredEvidenceLevel: "E2",
+        evidenceLevel: "E1",
+        updatedAt: new Date().toISOString(),
+        lastEventType: "TURN_STARTED",
+        stateVersion: 1,
+        source: "HOOK_EVENT",
+        stale: false,
+        ageSeconds: 1,
+      },
+      {
+        id: "task-2",
+        provider: "CLAUDE",
+        deviceId: "dev-1",
+        sessionId: "session-2",
+        title: "查找可清理文件",
+        controlMode: "OBSERVED",
+        capabilities: ["SEND_NEXT"],
+        state: "WAITING_USER",
+        confidence: "MEDIUM",
+        requiredEvidenceLevel: "E2",
+        evidenceLevel: "E1",
+        updatedAt: new Date(Date.now() - 600_000).toISOString(),
+        lastEventType: "WAITING_USER",
+        stateVersion: 2,
+        source: "HOOK_EVENT",
+        stale: true,
+        ageSeconds: 600,
+      },
+    ],
+  },
   attention: [],
   recent: [],
 };
@@ -44,7 +96,11 @@ describe("desktop console", () => {
     render(<MemoryRouter initialEntries={["/"]}><App /></MemoryRouter>);
     expect(screen.getByRole("heading", { name: "任务总览" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("100%")).toBeInTheDocument());
-    expect(screen.getByText("Codex")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "连接电脑上的 AI 任务" })).toBeInTheDocument();
+    expect(screen.getByText("分析 AI 任务汇总 RPA 可行性")).toBeInTheDocument();
+    expect(screen.getByText("查找可清理文件")).toBeInTheDocument();
+    expect(screen.getByText("状态待刷新")).toBeInTheDocument();
+    expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);
     expect(screen.getByText("健康")).toBeInTheDocument();
     expect(screen.getByText("尚无任务事件")).toBeInTheDocument();
   });

@@ -52,7 +52,11 @@ pub fn router(state: AppState, ui_dir: Option<std::path::PathBuf>) -> Router {
         .route("/v1/devices/enroll", post(enroll))
         .route("/v1/nodes/connect", get(node_connect))
         .nest("/api", api)
-        .layer(DefaultBodyLimit::max(1024 * 1024))
+        .with_state(state);
+    if let Some(directory) = ui_dir {
+        app = app.fallback_service(ServeDir::new(directory).append_index_html_on_directories(true));
+    }
+    app.layer(DefaultBodyLimit::max(1024 * 1024))
         .layer(SetResponseHeaderLayer::if_not_present(
             HeaderName::from_static("content-security-policy"),
             HeaderValue::from_static(
@@ -80,11 +84,6 @@ pub fn router(state: AppState, ui_dir: Option<std::path::PathBuf>) -> Router {
                 .allow_headers(tower_http::cors::Any)
                 .allow_methods(tower_http::cors::Any),
         )
-        .with_state(state);
-    if let Some(directory) = ui_dir {
-        app = app.fallback_service(ServeDir::new(directory).append_index_html_on_directories(true));
-    }
-    app
 }
 
 #[derive(Debug)]

@@ -15,8 +15,13 @@ macOS 已完成一次四工具真实投递 PoC，四个工具均成功返回终�
 
 ## 文档
 
+- [产品需求文档（PRD）](PRODUCT_PRD.md)
 - [完整技术可行性分析](AI_TASK_RPA_FEASIBILITY.md)
+- [技术实施方案](TECHNICAL_IMPLEMENTATION.md)
+- [测试与验证计划](TEST_PLAN.md)
 - [macOS 四工具实测摘要](runs/20260829-model-probe/summary.md)
+
+推荐阅读顺序：PRD → 技术实施方案 → 测试与验证计划 → 可行性分析与 PoC 证据。
 
 ## 隐私与证据
 

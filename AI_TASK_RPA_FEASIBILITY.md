@@ -63,7 +63,7 @@ Codex 当前任务状态可以被读取。核验时，除本分析任务外还�
 | Codex 定时巡检 | ChatGPT/Codex Scheduled task | 高 | 可定时汇总，并在 Scheduled 中形成收件箱；访问本地项目时电脑需开机且桌面应用运行 |
 | Claude Code | `TaskCompleted`、`Stop`、`StopFailure`、`SessionEnd` Hook | 高 | 支持命令、HTTP、MCP 等 Handler，事件覆盖较完整 |
 | Cursor 本机 Agent | `stop`、`sessionEnd`、`afterAgentResponse` Hook | 高 | 用户级或项目级脚本均可接入 |
-| Cursor Cloud Agent | v1 API、SSE、状态 Webhook | 高 | 可读取 Run 状态并向原 Agent 创建后续 Run；执行中重复投递会返回 `409 agent_busy` |
+| Cursor Cloud Agent | v1 API、SSE/轮询 | 高 | 可读取 Run 状态并向原 Agent 创建后续 Run；执行中重复投递会返回 `409 agent_busy`；v1 Webhook 尚未开放 |
 | Antigravity IDE / CLI | `Stop` Hook、CLI `stream-json`、SDK Lifecycle | 高 | Hook 带 `conversationId`、`terminationReason`、`fullyIdle`；CLI 和 SDK 可恢复会话 |
 | 只有网页/封闭客户端的 AI 工具 | 浏览器或辅助功能 UI RPA | 中低 | 页面结构、登录、弹窗和文案变化会导致失效，只应作为兜底 |
 
@@ -81,7 +81,7 @@ Codex 当前任务状态可以被读取。核验时，除本分析任务外还�
 - [Claude Channels](https://code.claude.com/docs/en/channels)
 - [Cursor Hooks](https://cursor.com/docs/hooks)
 - [Cursor Cloud Agents API](https://cursor.com/docs/cloud-agent/api/endpoints)
-- [Cursor Cloud Agent Webhooks](https://cursor.com/docs/cloud-agent/api/webhooks)
+- Cursor Cloud v1 当前为 Public Beta，官方端点文档标注 v1 Webhook 尚未开放；旧版 v0 Webhook 只能作为独立兼容能力
 - [Antigravity Hooks](https://antigravity.google/docs/hooks)
 - [Antigravity CLI Headless](https://antigravity.google/docs/cli/headless)
 - [Antigravity SDK Lifecycle](https://antigravity.google/docs/sdk/lifecycle)

@@ -1,7 +1,20 @@
 # AI 任务中控台首版功能与验证状态
 
-> 基线：v0.1.0，2026-08-29
-> 范围：`PRODUCT_PRD.md` 的 P0 本地版；P1 中央控制面不计入本版。
+> 基线：v0.2.0，2026-08-30
+> 范围：P0 本地版 + P1 单用户 Personal Sync；团队 RBAC 与正式 GA 门禁不计入本版。
+
+## 0. v0.2 Personal Sync
+
+| 功能 | 实现位置 | 自动验证 | 当前结论 |
+|---|---|---|---|
+| ctyun Rust 中央服务 | `crates/server` | 编译、认证和 PostgreSQL 集成测试 | 代码完成；ctyun RC 待部署 |
+| PostgreSQL 中央账本 | `crates/server/migrations` | 注册、事件、任务、命令闭环 | 完成 |
+| 一次性配对与设备撤销 | 中央设备 API、节点系统凭据库 | 令牌哈希、配对码消费、撤销契约 | 完成 |
+| 公网 WSS 双向通道 | `crates/node/src/sync.rs`、中央 WebSocket Hub | 协议、重连和幂等存储测试 | 代码完成；真实弱网待 RC |
+| 离线补传 | SQLite `sync_events` + batch ACK | 重试、ACK 后删除、重复事件测试 | 完成 |
+| 远程继续任务 | 中央加密命令、节点导入、状态回执 | 目标会话、重复命令、投递状态测试 | 完成 |
+| 多设备 PC/手机 UI | `apps/desktop` | 登录、总览、设备管理、响应式构建 | 完成 |
+| ctyun 容器交付 | `Dockerfile.central`、`deploy/ctyun` | Compose 校验、CI PostgreSQL 服务 | 完成；正式域名/ELB/RDS 待配置 |
 
 ## 1. P0 功能对照
 
@@ -40,7 +53,7 @@
 
 流水线执行：Rust 格式、Clippy、全 workspace 测试、React 测试、TypeScript/Vite 构建，并在 macOS 与 Windows 构建 Tauri 原生安装包。
 
-当前自动测试覆盖统一状态机、脱敏、四厂商 Hook 输入/输出、配置合并、SQLite 幂等、命令恰好一次语义、租约恢复、飞书汇总和控制台渲染。浏览器验收已覆盖桌面端任务闭环以及 390×844 响应式任务列表；本轮实际通过 34 个 Rust 核心/节点/存储测试与 4 个前端测试。完整 Tauri workspace 测试和双平台安装包仍由 CI/RC 环境执行。
+当前自动测试覆盖统一状态机、脱敏、四厂商 Hook 输入/输出、配置合并、SQLite 幂等、中央同步队列、远程命令幂等、租约恢复、飞书汇总和控制台渲染。浏览器验收已覆盖桌面端中央总览/设备配对，以及 390×844 手机端设备管理、任务详情和远程续派；本轮前端共通过 6 个测试，Rust 全 workspace 测试通过。PostgreSQL 集成用例已进入 CI，但本机 Docker 服务未运行，因此本轮本机数据库实跑记为 `SKIPPED`，不能冒充通过。
 
 ## 4. 发布候选仍需外部环境完成的门禁
 
@@ -52,5 +65,6 @@
 4. Codex、Claude、Antigravity 托管恢复命令的版本兼容；
 5. macOS 签名/公证、Windows Authenticode 与 SmartScreen；
 6. 72 小时稳定性、100 events/s 持续负载和磁盘满/数据库锁故障注入。
+7. ctyun ECS/ELB/RDS 上的 PostgreSQL 集成、双公网节点 WSS 重连、撤销令牌和离线补传闭环。
 
 这些门禁未通过前，交付结论只能是“首版功能代码完成并通过本机自动验证”，不能声称“双平台 GA 已验收”。

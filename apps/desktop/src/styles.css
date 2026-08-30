@@ -41,6 +41,7 @@ h1, h2, h3, p { margin-top: 0; }
 .sidebar-device { margin-top: auto; padding: 16px; border: 1px solid #d1d1cf; border-radius: 12px; background: #fff; display: grid; gap: 7px; font-size: 13px; }
 .sidebar-device span { color: var(--muted); }
 .sidebar-device small { color: #8b8e97; }
+.sidebar-logout { margin-top: 5px; padding: 8px 0 0; border: 0; border-top: 1px solid var(--border); background: transparent; color: var(--muted); text-align: left; cursor: pointer; font-size: 11px; }
 .online-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #24ad5a; margin-right: 6px; box-shadow: 0 0 0 3px #e8f8ee; }
 .online-dot.large { width: 12px; height: 12px; margin: 0 4px 0 0; }
 .main-content { min-width: 0; padding: 32px; max-width: 1540px; width: 100%; margin: 0 auto; }
@@ -215,6 +216,53 @@ label small { color: var(--muted); font-weight: 400; line-height: 1.5; }
 .diagnostic-panels .button + .button { margin-top: 9px; }
 .inline-notice { font-size: 11px; color: var(--muted); text-align: center; margin: 10px 0 0; }
 .success-notice { margin: 0 0 14px; padding: 10px 12px; color: #1e6b52; background: #edf9f5; border: 1px solid #ccecdf; border-radius: 8px; }
+.fleet-summary { margin-bottom: 16px; display: grid; grid-template-columns: repeat(3, 1fr); overflow: hidden; background: #fff; border: 1px solid var(--border); border-radius: 13px; box-shadow: var(--shadow); }
+.fleet-summary div { padding: 17px 20px; display: grid; gap: 6px; border-right: 1px solid var(--border); }
+.fleet-summary div:last-child { border: 0; }
+.fleet-summary span { color: var(--muted); font-size: 11px; }
+.fleet-summary strong { font-size: 22px; letter-spacing: -.03em; }
+.enrollment-card { margin-bottom: 16px; padding: 20px; display: flex; align-items: center; justify-content: space-between; gap: 24px; color: #fff; background: linear-gradient(135deg, #1e2944, #2d5ed9); border-radius: 14px; box-shadow: 0 14px 35px rgba(37, 73, 170, .22); }
+.enrollment-card div { display: grid; gap: 5px; }
+.enrollment-card span, .enrollment-card small { color: #cdd9fa; font-size: 11px; }
+.enrollment-card strong { font: 750 30px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; }
+.enrollment-card .button { background: #fff; color: #223669; }
+.device-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; }
+.device-card { min-width: 0; padding: 19px; display: grid; gap: 13px; background: #fff; border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+.device-card.revoked { opacity: .66; box-shadow: none; }
+.device-card header, .device-card footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.device-card h3 { margin: 0; font-size: 18px; }
+.device-card p { margin: -7px 0 0; color: var(--muted); font-size: 11px; }
+.device-card dl { margin: 0; display: grid; gap: 8px; }
+.device-card dl div { display: flex; justify-content: space-between; gap: 12px; }
+.device-card dt { color: var(--muted); font-size: 11px; }
+.device-card dd { max-width: 65%; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 650; }
+.device-card footer { padding-top: 12px; border-top: 1px solid #eff0f2; }
+.device-card footer .link-button { padding: 0; font-size: 11px; }
+.device-card footer .danger { color: var(--red); }
+.device-card footer .danger.confirm { padding: 6px 9px; color: #fff; background: var(--red); border-radius: 7px; }
+.device-os { min-width: 43px; height: 30px; display: grid; place-items: center; border-radius: 8px; background: #eef1f7; color: #3c4455; font: 750 10px/1 ui-monospace, monospace; text-transform: uppercase; }
+.device-os.macos { color: #fff; background: #24252a; }
+.device-os.windows { color: #2854b7; background: #eaf0ff; }
+.device-edit { display: grid; grid-template-columns: 1fr auto auto; gap: 7px; }
+.device-edit .button { min-height: 38px; padding: 0 11px; }
+.central-connected-card, .central-connect-form { max-width: 780px; margin: 0 auto 16px; padding: 24px; background: #fff; border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+.central-connected-card { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.central-connected-card h2 { margin: 11px 0 5px; }
+.central-connected-card p { margin: 0 0 6px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.central-connected-card small { color: #8b8e97; font-size: 10px; }
+.central-connect-form { display: grid; gap: 18px; }
+.central-connect-form h2 { margin-bottom: 7px; font-size: 20px; }
+.central-connect-form > div:first-child p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.login-page, .boot-page { min-height: 100vh; padding: 24px; display: grid; place-items: center; background: radial-gradient(circle at top left, #edf3ff, transparent 38%), var(--bg); }
+.login-card { width: min(100%, 440px); padding: 34px; background: #fff; border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 20px 60px rgba(34, 47, 78, .12); }
+.login-brand { display: flex; align-items: center; gap: 11px; font-size: 16px; font-weight: 760; }
+.login-cloud { display: inline-flex; margin: 30px 0 12px; padding: 6px 9px; color: var(--brand); background: var(--brand-soft); border-radius: 999px; font-size: 10px; font-weight: 750; letter-spacing: .04em; }
+.login-card h1 { margin-bottom: 10px; font-size: 28px; letter-spacing: -.04em; }
+.login-card > p { color: var(--muted); font-size: 13px; line-height: 1.7; }
+.login-card form { margin: 25px 0 16px; display: grid; gap: 14px; }
+.login-card > small { display: block; color: #8b8e97; text-align: center; font-size: 10px; }
+.boot-page { align-content: center; gap: 13px; text-align: center; }
+.boot-page p { max-width: 420px; color: var(--muted); font-size: 12px; }
 .mobile-nav { display: none; }
 
 @media (max-width: 1080px) {
@@ -228,10 +276,12 @@ label small { color: var(--muted); font-weight: 400; line-height: 1.5; }
 }
 
 @media (max-width: 760px) {
-  .app-shell { display: block; padding-bottom: 68px; }
+  .app-shell { display: block; padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
   .sidebar { display: none; }
   .main-content { padding: 20px 15px; }
-  .mobile-nav { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; height: 64px; display: grid; grid-template-columns: repeat(4, 1fr); background: rgba(255,255,255,.96); border-top: 1px solid var(--border); backdrop-filter: blur(14px); }
+  .button, input, select { min-height: 44px; }
+  .link-button { min-height: 40px; padding: 0 8px; }
+  .mobile-nav { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; height: calc(64px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: rgba(255,255,255,.96); border-top: 1px solid var(--border); backdrop-filter: blur(14px); }
   .mobile-nav a { display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; color: var(--muted); font-size: 10px; }
   .mobile-nav a span { font: 700 9px/1 ui-monospace, monospace; }
   .mobile-nav a.active { color: var(--brand); }
@@ -264,6 +314,17 @@ label small { color: var(--muted); font-weight: 400; line-height: 1.5; }
   .continue-form footer { display: grid; grid-template-columns: 1fr 1fr; }
   .hook-actions { align-items: stretch; flex-direction: column; }
   .hook-actions > div:last-child { display: grid; grid-template-columns: 1fr 1fr; }
+  .fleet-summary { grid-template-columns: repeat(3, 1fr); }
+  .fleet-summary div { padding: 13px 10px; }
+  .fleet-summary strong { font-size: 17px; }
+  .enrollment-card, .central-connected-card { align-items: stretch; flex-direction: column; }
+  .enrollment-card strong { font-size: 24px; }
+  .device-grid { grid-template-columns: 1fr; }
+  .device-card footer .link-button { min-height: 40px; padding: 0 8px; }
+  .central-connect-form, .central-connected-card { padding: 18px; }
+  .login-page { padding: 14px; }
+  .login-card { padding: 25px 20px; }
+  .login-card h1 { font-size: 24px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

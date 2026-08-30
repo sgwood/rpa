@@ -23,6 +23,7 @@ use crate::{AppState, diagnostics, discovery, hook_install, notify};
 pub fn router(state: AppState) -> Router {
     let api = Router::new()
         .route("/health", get(health))
+        .route("/session", get(session))
         .route("/dashboard", get(dashboard))
         .route("/devices", get(devices))
         .route("/adapters", get(adapters))
@@ -37,7 +38,10 @@ pub fn router(state: AppState) -> Router {
         .route("/diagnostics", get(diagnostics_report))
         .route("/diagnostics/export", get(export_diagnostics))
         .route("/settings/feishu", post(set_feishu))
-        .route("/notifications/flush", post(flush_notifications));
+        .route("/notifications/flush", post(flush_notifications))
+        .route("/central/status", get(central_status))
+        .route("/central/connect", post(central_connect))
+        .route("/central/disconnect", post(central_disconnect));
     let mut app = Router::new()
         .nest("/api", api)
         .layer(DefaultBodyLimit::max(1024 * 1024))
@@ -105,6 +109,58 @@ async fn health(State(state): State<AppState>) -> Json<Value> {
         "deviceId": state.device.id,
         "uptimeSeconds": (Utc::now() - state.started_at).num_seconds().max(0)
     }))
+}
+
+async fn session() -> Json<Value> {
+    Json(json!({
+        "mode": "LOCAL",
+        "authenticated": true,
+        "version": env!("CARGO_PKG_VERSION")
+    }))
+}
+
+async fn central_status(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let connection = crate::config::load_central_connection(&state.store, &state.device)?;
+    Ok(Json(json!({
+        "configured": connection.is_some(),
+        "serverUrl": connection.as_ref().map(|item| &item.server_url),
+        "deviceAlias": connection.as_ref().map(|item| &item.device_alias),
+        "deviceId": state.device.id
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CentralConnectRequest {
+    server_url: String,
+    enrollment_code: String,
+    device_alias: Option<String>,
+}
+
+async fn central_connect(
+    State(state): State<AppState>,
+    Json(request): Json<CentralConnectRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let alias = request
+        .device_alias
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&state.device.hostname);
+    crate::sync::enroll(
+        &state,
+        request.server_url.trim(),
+        request.enrollment_code.trim(),
+        alias,
+    )
+    .await
+    .map_err(ApiError::bad_request)?;
+    Ok(Json(json!({"configured":true,"deviceId":state.device.id})))
+}
+
+async fn central_disconnect(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    crate::config::clear_central_connection(&state.store, &state.device)?;
+    Ok(Json(json!({"configured":false})))
 }
 
 async fn devices(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {

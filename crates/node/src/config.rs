@@ -12,6 +12,17 @@ use crate::ensure_private_directory;
 
 pub const DEFAULT_BIND: &str = "127.0.0.1:3847";
 pub const KEYRING_SERVICE: &str = "com.stargold.ai-rpa";
+const CENTRAL_URL_KEY: &str = "central_server_url";
+const CENTRAL_ALIAS_KEY: &str = "central_device_alias";
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CentralConnection {
+    pub server_url: String,
+    pub device_alias: String,
+    #[serde(skip_serializing)]
+    pub node_token: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct AppPaths {
@@ -113,6 +124,72 @@ pub fn load_or_create_device(store: &Store) -> Result<DeviceRecord> {
     };
     store.upsert_device(&device)?;
     Ok(device)
+}
+
+pub fn save_central_connection(
+    store: &Store,
+    device: &DeviceRecord,
+    server_url: &str,
+    alias: &str,
+    token: &str,
+) -> Result<()> {
+    let normalized = server_url.trim().trim_end_matches('/');
+    if !(normalized.starts_with("https://")
+        || cfg!(debug_assertions) && normalized.starts_with("http://"))
+    {
+        bail!("central server must use HTTPS outside development builds");
+    }
+    store.set_meta(CENTRAL_URL_KEY, normalized)?;
+    store.set_meta(CENTRAL_ALIAS_KEY, alias.trim())?;
+    keyring::Entry::new(
+        KEYRING_SERVICE,
+        &format!("central-node-token:{}", device.id),
+    )?
+    .set_password(token)
+    .context("save central node token in OS credential store")?;
+    Ok(())
+}
+
+pub fn load_central_connection(
+    store: &Store,
+    device: &DeviceRecord,
+) -> Result<Option<CentralConnection>> {
+    let Some(server_url) = store
+        .get_meta(CENTRAL_URL_KEY)?
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Ok(None);
+    };
+    let device_alias = store
+        .get_meta(CENTRAL_ALIAS_KEY)?
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| device.hostname.clone());
+    let node_token = env::var("AI_RPA_NODE_TOKEN").ok().or_else(|| {
+        keyring::Entry::new(
+            KEYRING_SERVICE,
+            &format!("central-node-token:{}", device.id),
+        )
+        .ok()?
+        .get_password()
+        .ok()
+    });
+    Ok(node_token.map(|node_token| CentralConnection {
+        server_url,
+        device_alias,
+        node_token,
+    }))
+}
+
+pub fn clear_central_connection(store: &Store, device: &DeviceRecord) -> Result<()> {
+    store.set_meta(CENTRAL_URL_KEY, "")?;
+    store.set_meta(CENTRAL_ALIAS_KEY, "")?;
+    if let Ok(entry) = keyring::Entry::new(
+        KEYRING_SERVICE,
+        &format!("central-node-token:{}", device.id),
+    ) {
+        let _ = entry.delete_credential();
+    }
+    Ok(())
 }
 
 fn system_hostname() -> String {

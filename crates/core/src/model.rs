@@ -362,3 +362,93 @@ pub struct AdapterStatus {
     pub capabilities: Vec<Capability>,
     pub message: String,
 }
+
+/// Messages exchanged over the authenticated node-to-central WSS channel.
+/// The protocol deliberately contains no shell, environment or filesystem fields.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "payload", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum NodeToServerMessage {
+    Heartbeat {
+        device: DeviceRecord,
+        adapters: Vec<AdapterStatus>,
+        sent_at: DateTime<Utc>,
+    },
+    EventBatch {
+        batch_id: Uuid,
+        events: Vec<UnifiedEvent>,
+    },
+    CommandAck {
+        command_id: Uuid,
+        state: CommandState,
+        result_summary: Option<String>,
+        sent_at: DateTime<Utc>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "payload", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ServerToNodeMessage {
+    Welcome {
+        heartbeat_seconds: u64,
+        server_time: DateTime<Utc>,
+    },
+    Command(RemoteCommand),
+    EventBatchAck {
+        batch_id: Uuid,
+        accepted: usize,
+    },
+    CommandAckReceipt {
+        command_id: Uuid,
+        state: CommandState,
+    },
+    Ping {
+        server_time: DateTime<Utc>,
+    },
+    Error {
+        code: String,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteCommand {
+    pub id: Uuid,
+    pub central_task_id: Uuid,
+    pub provider: Provider,
+    pub device_id: String,
+    pub session_id: String,
+    pub action: CommandAction,
+    pub message: String,
+    pub created_by: String,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[cfg(test)]
+mod sync_protocol_tests {
+    use super::*;
+
+    #[test]
+    fn remote_protocol_cannot_carry_arbitrary_shell_fields() {
+        let value = serde_json::json!({
+            "type": "COMMAND",
+            "payload": {
+                "id": Uuid::nil(),
+                "centralTaskId": Uuid::nil(),
+                "provider": "CODEX",
+                "deviceId": "device",
+                "sessionId": "session",
+                "action": "SEND_NEXT",
+                "message": "run tests",
+                "createdBy": "admin",
+                "createdAt": "2026-08-30T00:00:00Z",
+                "expiresAt": "2026-08-30T01:00:00Z",
+                "shell": "rm -rf /"
+            }
+        });
+        let message: ServerToNodeMessage = serde_json::from_value(value).unwrap();
+        let encoded = serde_json::to_value(message).unwrap();
+        assert!(encoded["payload"].get("shell").is_none());
+    }
+}

@@ -100,6 +100,16 @@ CREATE TABLE IF NOT EXISTS outbox (
   sent_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(state, next_attempt_at);
+CREATE TABLE IF NOT EXISTS sync_events (
+  event_id TEXT PRIMARY KEY REFERENCES events(event_id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT
+);
+CREATE TABLE IF NOT EXISTS remote_command_sync (
+  command_id TEXT PRIMARY KEY REFERENCES commands(id) ON DELETE CASCADE,
+  last_reported_state TEXT
+);
 "#;
 
 #[derive(Clone)]
@@ -210,7 +220,7 @@ pub struct OutboxItem {
 
 impl Store {
     pub fn open(path: impl AsRef<std::path::Path>, crypto: CryptoBox) -> Result<Self> {
-        let connection = Connection::open(path).context("open sqlite database")?;
+        let mut connection = Connection::open(path).context("open sqlite database")?;
         connection
             .pragma_update(None, "journal_mode", "WAL")
             .context("enable sqlite WAL")?;
@@ -223,6 +233,24 @@ impl Store {
         connection
             .execute_batch(SCHEMA)
             .context("initialize schema")?;
+        let sync_backfill_complete: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM meta WHERE key='central_sync_backfill_v1')",
+            [],
+            |row| row.get(0),
+        )?;
+        if !sync_backfill_complete {
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "INSERT OR IGNORE INTO sync_events(event_id, created_at)
+                 SELECT event_id, occurred_at FROM events",
+                [],
+            )?;
+            transaction.execute(
+                "INSERT INTO meta(key,value) VALUES('central_sync_backfill_v1','complete')",
+                [],
+            )?;
+            transaction.commit()?;
+        }
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
             crypto: Arc::new(crypto),
@@ -337,6 +365,11 @@ impl Store {
                 delivery: None,
             });
         }
+
+        transaction.execute(
+            "INSERT OR IGNORE INTO sync_events(event_id, created_at) VALUES (?1, ?2)",
+            params![event.event_id.to_string(), Utc::now().to_rfc3339()],
+        )?;
 
         let events = events_for_task_tx(&transaction, task_id)?;
         let derived = derive_state(&events, previous.required_evidence_level);
@@ -672,6 +705,145 @@ impl Store {
         Ok(record)
     }
 
+    pub fn pending_sync_events(&self, limit: usize) -> Result<Vec<UnifiedEvent>> {
+        let connection = self.connection.lock().expect("sqlite mutex poisoned");
+        let mut statement = connection.prepare(
+            "SELECT events.event_json FROM sync_events
+             JOIN events ON events.event_id=sync_events.event_id
+             ORDER BY sync_events.created_at LIMIT ?1",
+        )?;
+        let rows = statement.query_map([limit.min(500) as i64], |row| row.get::<_, String>(0))?;
+        rows.map(|row| serde_json::from_str(&row?).context("decode sync event"))
+            .collect()
+    }
+
+    pub fn mark_sync_events_sent(&self, event_ids: &[Uuid]) -> Result<()> {
+        let mut connection = self.connection.lock().expect("sqlite mutex poisoned");
+        let transaction = connection.transaction()?;
+        for event_id in event_ids {
+            transaction.execute(
+                "DELETE FROM sync_events WHERE event_id=?1",
+                [event_id.to_string()],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn mark_sync_events_retry(&self, event_ids: &[Uuid], error: &str) -> Result<()> {
+        let mut connection = self.connection.lock().expect("sqlite mutex poisoned");
+        let transaction = connection.transaction()?;
+        for event_id in event_ids {
+            transaction.execute(
+                "UPDATE sync_events SET attempts=attempts+1,last_error=?2 WHERE event_id=?1",
+                params![event_id.to_string(), redact_text(error).text],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn import_remote_command(&self, remote: &ai_rpa_core::RemoteCommand) -> Result<bool> {
+        let mut connection = self.connection.lock().expect("sqlite mutex poisoned");
+        let transaction = connection.transaction()?;
+        let exists: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM commands WHERE id=?1)",
+            [remote.id.to_string()],
+            |row| row.get(0),
+        )?;
+        if exists {
+            transaction.commit()?;
+            return Ok(false);
+        }
+        let task_json: String = transaction
+            .query_row(
+                "SELECT snapshot_json FROM tasks WHERE provider=?1 AND device_id=?2 AND session_id=?3",
+                params![remote.provider.as_str(), remote.device_id, remote.session_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .context("remote command target session is not present on this device")?;
+        let task: TaskRecord = serde_json::from_str(&task_json)?;
+        validate_action(&task, remote.action)?;
+        if remote.expires_at <= Utc::now() {
+            bail!("remote command already expired");
+        }
+        let record = CommandRecord {
+            id: remote.id,
+            task_id: task.id,
+            provider: remote.provider,
+            device_id: remote.device_id.clone(),
+            session_id: remote.session_id.clone(),
+            action: remote.action,
+            state: CommandState::Queued,
+            message: None,
+            created_by: format!("central:{}", redact_text(&remote.created_by).text),
+            created_at: remote.created_at,
+            expires_at: remote.expires_at,
+            lease_owner: None,
+            lease_until: None,
+            attempts: 0,
+            max_attempts: 3,
+            result_summary: None,
+        };
+        transaction.execute(
+            "INSERT INTO commands(id,task_id,device_id,action,state,body_ciphertext,created_at,expires_at,attempts,record_json)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,0,?9)",
+            params![
+                record.id.to_string(),
+                record.task_id.to_string(),
+                record.device_id,
+                record.action.to_string(),
+                record.state.to_string(),
+                self.crypto.encrypt(&remote.message)?,
+                record.created_at.to_rfc3339(),
+                record.expires_at.to_rfc3339(),
+                serde_json::to_string(&record)?
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO remote_command_sync(command_id,last_reported_state) VALUES(?1,'QUEUED')",
+            [record.id.to_string()],
+        )?;
+        append_audit_tx(
+            &transaction,
+            Some(task.id),
+            Some(record.id),
+            "REMOTE_COMMAND_ACCEPTED",
+            "central-sync",
+            "authenticated remote command accepted into local queue",
+        )?;
+        transaction.commit()?;
+        Ok(true)
+    }
+
+    pub fn remote_command_updates(&self) -> Result<Vec<CommandRecord>> {
+        let connection = self.connection.lock().expect("sqlite mutex poisoned");
+        let mut statement = connection.prepare(
+            "SELECT commands.record_json FROM remote_command_sync
+             JOIN commands ON commands.id=remote_command_sync.command_id
+             WHERE commands.state NOT IN ('CREATED','QUEUED','LEASED')
+               AND (remote_command_sync.last_reported_state IS NULL OR remote_command_sync.last_reported_state<>commands.state)
+             ORDER BY commands.created_at LIMIT 100",
+        )?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|row| serde_json::from_str(&row?).context("decode remote command update"))
+            .collect()
+    }
+
+    pub fn mark_remote_command_reported(
+        &self,
+        command_id: Uuid,
+        state: CommandState,
+    ) -> Result<()> {
+        let connection = self.connection.lock().expect("sqlite mutex poisoned");
+        connection.execute(
+            "UPDATE remote_command_sync SET last_reported_state=?2 WHERE command_id=?1",
+            params![command_id.to_string(), state.to_string()],
+        )?;
+        Ok(())
+    }
+
     pub fn due_outbox(&self, limit: usize) -> Result<Vec<OutboxItem>> {
         let connection = self.connection.lock().expect("sqlite mutex poisoned");
         let mut statement = connection.prepare(
@@ -746,7 +918,10 @@ impl Store {
             "events": event_count,
             "quarantine": quarantine_count,
             "commands": command_count,
-            "pendingOutbox": pending_outbox
+            "pendingOutbox": pending_outbox,
+            "pendingCentralSync": connection.query_row(
+                "SELECT COUNT(*) FROM sync_events", [], |row| row.get::<_, i64>(0)
+            )?
         }))
     }
 }
@@ -1350,5 +1525,58 @@ mod tests {
             )
             .unwrap_err();
         assert!(error.to_string().contains("at most 5 pending"));
+    }
+
+    #[test]
+    fn central_sync_is_durable_and_remote_commands_are_idempotent() {
+        let (directory, store) = store();
+        let task = store
+            .ingest_event(&raw("start", "sync-event", json!({})))
+            .unwrap()
+            .task;
+        let pending = store.pending_sync_events(10).unwrap();
+        assert_eq!(pending.len(), 1);
+        store
+            .mark_sync_events_retry(&[pending[0].event_id], "temporary network error")
+            .unwrap();
+        assert_eq!(store.pending_sync_events(10).unwrap().len(), 1);
+        store.mark_sync_events_sent(&[pending[0].event_id]).unwrap();
+        assert!(store.pending_sync_events(10).unwrap().is_empty());
+        drop(store);
+        let store = Store::open(
+            directory.path().join("test.db"),
+            CryptoBox::from_key([7_u8; 32]),
+        )
+        .unwrap();
+        assert!(store.pending_sync_events(10).unwrap().is_empty());
+
+        let remote = ai_rpa_core::RemoteCommand {
+            id: Uuid::new_v4(),
+            central_task_id: Uuid::new_v4(),
+            provider: task.provider,
+            device_id: task.device_id.clone(),
+            session_id: task.session_id.clone(),
+            action: CommandAction::SendNext,
+            message: "继续验证".to_owned(),
+            created_by: "central-admin".to_owned(),
+            created_at: Utc::now(),
+            expires_at: Utc::now() + Duration::hours(1),
+        };
+        assert!(store.import_remote_command(&remote).unwrap());
+        assert!(!store.import_remote_command(&remote).unwrap());
+        assert!(store.remote_command_updates().unwrap().is_empty());
+        let delivered = store
+            .ingest_event(&raw("stop", "sync-stop", json!({})))
+            .unwrap()
+            .delivery
+            .unwrap();
+        assert_eq!(delivered.command_id, remote.id);
+        assert_eq!(delivered.message, "继续验证");
+        let updates = store.remote_command_updates().unwrap();
+        assert_eq!(updates[0].state, CommandState::Delivered);
+        store
+            .mark_remote_command_reported(remote.id, CommandState::Delivered)
+            .unwrap();
+        assert!(store.remote_command_updates().unwrap().is_empty());
     }
 }

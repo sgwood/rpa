@@ -1,9 +1,9 @@
 [workspace]
-members = ["crates/core", "crates/store", "crates/node", "apps/desktop/src-tauri"]
+members = ["crates/core", "crates/store", "crates/node", "crates/server", "apps/desktop/src-tauri"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/sgwood/rpa"
@@ -11,12 +11,13 @@ repository = "https://github.com/sgwood/rpa"
 [workspace.dependencies]
 aes-gcm = "0.10"
 anyhow = "1"
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 directories = "6"
 hex = "0.4"
+futures-util = "0.3"
 keyring = { version = "3", features = ["apple-native", "windows-native"] }
 rand = "0.9"
 regex = "1"
@@ -25,10 +26,13 @@ rusqlite = { version = "0.37", features = ["bundled", "chrono", "uuid"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+sqlx-core = { version = "=0.8.6", default-features = false, features = ["_rt-tokio", "_tls-rustls-ring-webpki", "chrono", "uuid", "json"] }
+sqlx-postgres = { version = "=0.8.6", default-features = false, features = ["chrono", "uuid", "json"] }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "set-header", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4", "serde"] }

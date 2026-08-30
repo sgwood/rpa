@@ -1,0 +1,36 @@
+upstream ai_rpa_central {
+    server 127.0.0.1:18180;
+    keepalive 16;
+}
+
+server {
+    listen 80;
+    server_name ai-rpa-test.qiyefly.cn;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ai-rpa-test.qiyefly.cn;
+
+    ssl_certificate     /etc/nginx/ssl/qiyefly.cn/fullchain.cer;
+    ssl_certificate_key /etc/nginx/ssl/qiyefly.cn/qiyefly.cn.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    client_max_body_size 2m;
+    access_log /data/wwwlogs/ai-rpa-test.access.log;
+    error_log  /data/wwwlogs/ai-rpa-test.error.log;
+
+    location / {
+        proxy_pass http://ai_rpa_central;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 100s;
+        proxy_send_timeout 100s;
+    }
+}

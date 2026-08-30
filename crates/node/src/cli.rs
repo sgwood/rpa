@@ -75,6 +75,16 @@ enum Commands {
         #[arg(long, default_value_t = 7200)]
         ttl_seconds: i64,
     },
+    Connect {
+        #[arg(long)]
+        server: String,
+        #[arg(long)]
+        code: String,
+        #[arg(long)]
+        alias: Option<String>,
+    },
+    Disconnect,
+    CentralStatus,
 }
 
 pub fn is_cli_invocation() -> bool {
@@ -89,6 +99,9 @@ pub fn is_cli_invocation() -> bool {
                 | "uninstall-hooks"
                 | "export-diagnostics"
                 | "command"
+                | "connect"
+                | "disconnect"
+                | "central-status"
                 | "--help"
                 | "--version"
                 | "-h"
@@ -210,6 +223,40 @@ pub async fn run() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&command)?);
             Ok(())
         }
+        Commands::Connect {
+            server,
+            code,
+            alias,
+        } => {
+            let alias = alias.unwrap_or_else(|| state.device.hostname.clone());
+            crate::sync::enroll(&state, &server, &code, &alias).await?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "connected": true,
+                    "serverUrl": server.trim_end_matches('/'),
+                    "deviceId": state.device.id,
+                    "alias": alias
+                }))?
+            );
+            Ok(())
+        }
+        Commands::Disconnect => {
+            crate::config::clear_central_connection(&state.store, &state.device)?;
+            println!("{}", json!({"connected": false}));
+            Ok(())
+        }
+        Commands::CentralStatus => {
+            let connection = crate::config::load_central_connection(&state.store, &state.device)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "configured": connection.is_some(),
+                    "connection": connection
+                }))?
+            );
+            Ok(())
+        }
     }
 }
 
@@ -234,6 +281,7 @@ pub async fn serve(
         .await
         .with_context(|| format!("bind local API to {bind}"))?;
     tracing::info!(%bind, device_id = %state.device.id, "AI RPA node started");
+    tokio::spawn(crate::sync::run(state.clone()));
     tokio::spawn(background_tasks(state.clone()));
     axum::serve(listener, router(state)).await?;
     Ok(())

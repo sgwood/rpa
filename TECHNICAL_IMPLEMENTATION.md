@@ -1,7 +1,7 @@
 # AI 任务中控台技术实施方案
 
-> 版本：v1.0
-> 日期：2026-08-29
+> 版本：v1.1
+> 日期：2026-08-30
 > 对应产品文档：[PRODUCT_PRD.md](PRODUCT_PRD.md)
 > 对应测试计划：[TEST_PLAN.md](TEST_PLAN.md)
 
@@ -15,7 +15,7 @@
 - 密钥进入 **macOS Keychain / Windows Credential Manager**，命令正文用 AES-256-GCM 加密；
 - 本地 API 只监听 `127.0.0.1:3847`，Tauri、Hook CLI 与浏览器开发环境使用同一接口；
 - 状态由确定性状态机判断，模型文本不能越过配置的 E2/E3 证据门槛；
-- P0 不依赖中央服务。多设备云同步、团队 RBAC 和远程命令保留到 P1。
+- P0 仍可完全本地运行；v0.2 已加入面向 ctyun 的单用户 Personal Sync。团队 RBAC、高可用和企业 SSO 保留到后续版本。
 
 Rust、Node.js 和依赖由 `rust-toolchain.toml`、`Cargo.lock`、`.nvmrc`、`package-lock.json` 固定。
 
@@ -59,7 +59,8 @@ Antigravity Hook/CLI ──┘          │                    │              
 2. `ai-rpa hook <provider> <event>`：极轻量 Hook 入口，把标准输入转发给节点后立即退出；
 3. `ai-rpa-desktop`：Tauri 原生程序；正常启动显示 UI，携带 CLI 子命令时作为后台节点或 Hook 运行；
 4. `apps/desktop`：React 控制台和响应式移动布局；
-5. 中央服务和 GUI 输入驱动不进入 P0，后续作为独立进程引入。
+5. `ai-rpa-server`：部署在 ctyun 的独立 Rust 中央服务，负责 PostgreSQL、设备配对、WSS、远程命令和 Web 控制台；
+6. GUI 输入驱动仍不进入可信链，继续只作为未来的隔离降级插件。
 
 ### 3.2 部署模式
 
@@ -254,7 +255,7 @@ CREATED -> QUEUED -> LEASED -> DELIVERED -> ACCEPTED -> COMPLETED
 | `notifications` | channel, dedupe_key, state, attempts | 通知记录 |
 | `audit_logs` | actor, action, target, result, trace_id | 管理与安全审计 |
 
-本地 SQLite 与中央 PostgreSQL 使用同一逻辑模型，但中央端不复制 `body_encrypted` 和本机原始证据，除非用户显式开启内容同步。
+本地 SQLite 与中央 PostgreSQL 使用同一逻辑模型。中央端同步脱敏任务事件和摘要，不上传本机原始证据；用户从中央端主动创建的远程任务正文使用独立 AES-256-GCM 密钥加密后保存，API、日志与审计只返回脱敏元数据。
 
 ## 9. 接口设计
 
@@ -274,18 +275,18 @@ CREATED -> QUEUED -> LEASED -> DELIVERED -> ACCEPTED -> COMPLETED
 | `POST` | `/api/settings/feishu` | 把 Webhook 写入系统凭据库 |
 | `POST` | `/api/notifications/flush` | 立即处理通知 Outbox |
 
-本地 API 默认只通过 UDS/Named Pipe 开放。调试 HTTP API 使用当前用户短期令牌与严格 Origin 检查。
+v0.2 本地 API 固定监听 loopback HTTP，并执行严格 Origin 检查；迁移到 UDS/Named Pipe 与当前用户 ACL 是后续加固项。
 
 ### 9.2 中央 API
 
-- `POST /v1/devices/enroll`：一次性注册码换取设备证书；
-- `GET /v1/tasks`、`GET /v1/tasks/{id}`：跨设备查询；
-- `POST /v1/sessions/{id}/commands`：创建受审计命令；
-- `GET /v1/events/stream`：控制台 SSE；
-- `POST /v1/integrations/feishu/callback`：飞书卡片回调；
-- `POST /v1/nodes/connect`：升级为 WSS 后的设备双向通道。
+- `POST /v1/devices/enroll`：一次性注册码换取独立设备令牌；
+- `GET /v1/nodes/connect`：携带设备 Bearer Token 升级为 WSS 双向通道；
+- `GET /api/session`、`GET /api/dashboard`：中央 Web 登录校验与跨设备总览；
+- `GET /api/devices`、`POST /api/devices/enrollment-codes`、`PATCH /api/devices/{id}`、`POST /api/devices/{id}/revoke`：设备生命周期；
+- `GET /api/tasks`、`GET /api/tasks/{id}`：跨设备任务查询；
+- `POST /api/tasks/{id}/commands`：创建加密且受审计的结构化远程任务。
 
-所有写接口要求认证、目标设备/会话授权、幂等键和审计上下文。
+管理员接口要求 Bearer Token；设备接口要求独立设备令牌并核对设备 ID。v0.2 控制台使用有界轮询，团队身份、SSE 和飞书交互回调属于后续版本。
 
 ## 10. 飞书通知设计
 
@@ -309,11 +310,11 @@ CREATED -> QUEUED -> LEASED -> DELIVERED -> ACCEPTED -> COMPLETED
 
 ### 11.1 威胁边界
 
-重点防范：恶意 Hook 输入、Prompt 注入变成控制指令、远程命令越权、重放、设备证书泄漏、诊断包泄密和 GUI 驱动误操作。
+重点防范：恶意 Hook 输入、Prompt 注入变成控制指令、远程命令越权、重放、设备令牌泄漏、诊断包泄密和 GUI 驱动误操作。
 
 ### 11.2 控制措施
 
-- 每台设备独立密钥和证书，可单独撤销；
+- 每台设备独立随机令牌，服务端只保存哈希并可单独撤销；团队版再升级为短期凭据或 mTLS；
 - 节点到服务端 TLS，团队模式启用 mTLS；
 - 本地数据库敏感列应用层加密，密钥只存系统凭据库；
 - 严格 JSON Schema、载荷上限、路径规范化和超时；
@@ -391,11 +392,11 @@ CREATED -> QUEUED -> LEASED -> DELIVERED -> ACCEPTED -> COMPLETED
 - macOS/Windows 安装、升级、卸载；
 - 飞书单用户通知。
 
-### 阶段 C：多设备 Beta（P1，未实现）
+### 阶段 C：多设备 Personal Sync Beta（v0.2 代码已实现，ctyun RC 待验收）
 
 - 中央 Rust 服务、PostgreSQL、设备注册、WSS；
 - 多设备任务和远程命令；
-- RBAC、审计、飞书卡片；
+- 单管理员令牌、设备撤销、命令审计；团队 RBAC 与飞书交互卡片留待后续；
 - Windows Native、WSL、睡眠/断网和 72 小时稳定性测试。
 
 ### 阶段 D：受控 GA（2 周）

@@ -7,6 +7,7 @@ pub mod discovery;
 pub mod hook;
 pub mod hook_install;
 pub mod notify;
+pub mod sync;
 
 use std::{path::Path, sync::Arc};
 

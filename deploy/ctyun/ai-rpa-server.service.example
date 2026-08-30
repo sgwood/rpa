@@ -1,0 +1,27 @@
+[Unit]
+Description=AI RPA central control plane
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ai-rpa
+Group=ai-rpa
+WorkingDirectory=/opt/ai-rpa
+EnvironmentFile=/etc/ai-rpa/server.env
+ExecStart=/opt/ai-rpa/bin/ai-rpa-server
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

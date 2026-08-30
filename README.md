@@ -7,7 +7,7 @@
 
 一个面向 macOS 与 Windows 的、本地优先的开源 AI Agent 任务中控台。它统一采集和展示多个 AI 编程工具的任务状态，并在工具官方能力允许时继续发送任务。
 
-> 项目目前处于 `0.1.x` 早期阶段。请先阅读[当前验证边界](#当前验证边界)，不要将“检测到工具进程”理解为“已确认任务正在执行”。
+> 项目目前处于 `0.2.x Personal Sync` 阶段。请先阅读[当前验证边界](#当前验证边界)，不要将“检测到工具进程”理解为“已确认任务正在执行”。
 
 English documentation: [README.en.md](README.en.md)
 
@@ -32,6 +32,10 @@ English documentation: [README.en.md](README.en.md)
 - 本地 SQLite 存储，敏感命令体加密，诊断信息脱敏
 - macOS LaunchAgent、Windows 登录任务和 Tauri 桌面打包
 - API 默认仅监听 `127.0.0.1`
+- ctyun 中央服务、PostgreSQL、一次性设备配对与令牌撤销
+- 节点主动建立 `443/WSS` 公网连接，无需同一局域网或开放电脑入站端口
+- 断网事件补传、跨设备任务查询、加密远程命令和执行回执
+- PC Web、Tauri 桌面端和手机响应式/PWA 管理界面
 
 ## 技术栈
 
@@ -39,6 +43,7 @@ English documentation: [README.en.md](README.en.md)
 - Tauri 2
 - React 19、TypeScript、Vite
 - macOS Keychain / Windows Credential Manager
+- ctyun ECS / ELB / RDS PostgreSQL（中央端推荐部署）
 
 ## 快速开始
 
@@ -113,10 +118,33 @@ npm --prefix apps/desktop run tauri build -- --bundles nsis
 
 macOS 安装脚本和 Windows PowerShell 安装脚本分别位于 `scripts/install-macos.sh` 与 `scripts/install-windows.ps1`。
 
+### ctyun 中央控制台
+
+中央端部署文件位于 [`deploy/ctyun`](deploy/ctyun/README.md)：
+
+```bash
+cd deploy/ctyun
+cp .env.example .env
+# 填写随机管理令牌、数据加密密钥和数据库密码
+docker compose up -d --build
+curl --fail http://127.0.0.1:8080/health
+```
+
+在中央 Web 控制台生成一次性配对码后，可以从目标电脑的“设备”页面完成配对，也可以使用 CLI：
+
+```bash
+ai-rpa connect \
+  --server https://your-ai-control.example.com \
+  --code ONE_TIME_CODE \
+  --alias "开发 Mac"
+```
+
 ## 当前验证边界
 
 - macOS 已完成一次四工具真实投递 PoC，并完成签名应用的本机安装验证。
+- v0.2 中央服务、设备配对、WSS 同步、远程命令和响应式多设备 UI 已完成代码实现与自动测试。
 - Windows Native / WSL、真实飞书 Webhook、macOS 公证及 Windows 正式签名仍需在发布候选环境验收。
+- 真实 ctyun ELB/RDS、多公网终端、睡眠唤醒和 72 小时稳定性仍需在部署环境验收。
 - 实时任务数来自工具 Hook 事件；仅检测到 IDE 进程时，只能说明工具已连接，不能证明其中存在执行中的任务。
 - 项目不会根据窗口标题、提示词或聊天内容猜测任务结果。
 

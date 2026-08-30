@@ -20,6 +20,23 @@ export interface Device {
   logicalEnvironment: string;
   nodeVersion: string;
   lastSeenAt: string;
+  alias?: string;
+  online?: boolean;
+  revoked?: boolean;
+  connectedAt?: string;
+}
+
+export interface SessionInfo {
+  mode: "LOCAL" | "CENTRAL";
+  authenticated: boolean;
+  version: string;
+}
+
+export interface CentralStatus {
+  configured: boolean;
+  serverUrl?: string;
+  deviceAlias?: string;
+  deviceId: string;
 }
 export interface Adapter {
   provider: Provider;

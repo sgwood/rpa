@@ -1,6 +1,8 @@
 import {
   type FormEvent,
   type ReactNode,
+  createContext,
+  useContext,
   useCallback,
   useEffect,
   useMemo,
@@ -15,7 +17,7 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
-import { api } from "./api";
+import { api, ApiError } from "./api";
 import {
   adapterMessageLabel,
   diagnosticLabel,
@@ -29,14 +31,23 @@ import {
 } from "./format";
 import type {
   Adapter,
+  CentralStatus,
   Dashboard as DashboardData,
+  Device,
   Diagnostics as DiagnosticsData,
   LiveProvider,
   LiveTask,
+  SessionInfo,
   Task,
   TaskDetail as TaskDetailData,
   TaskState,
 } from "./types";
+
+const SessionContext = createContext<SessionInfo>({ mode: "LOCAL", authenticated: true, version: "" });
+
+function useSession() {
+  return useContext(SessionContext);
+}
 
 function usePolling<T>(loader: () => Promise<T>, interval = 5_000) {
   const [data, setData] = useState<T>();
@@ -61,11 +72,13 @@ function usePolling<T>(loader: () => Promise<T>, interval = 5_000) {
 }
 
 function AppShell({ children }: { children: ReactNode }) {
+  const session = useSession();
   const navigation = [
     ["/", "总览", "01"],
     ["/tasks", "任务", "02"],
     ["/tasks?state=WAITING_USER", "等待处理", "03"],
-    ["/integrations", "设备与接入", "04"],
+    ["/devices", "设备", "04"],
+    ...(session.mode === "LOCAL" ? [["/integrations", "本机接入", "05"]] : []),
   ];
   return (
     <div className="app-shell">
@@ -91,9 +104,10 @@ function AppShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <div className="sidebar-device">
-          <strong>本机节点</strong>
-          <span><i className="online-dot" /> 30 秒心跳</span>
-          <small>数据默认仅保存在本机</small>
+          <strong>{session.mode === "CENTRAL" ? "ctyun 中央控制台" : "本机节点"}</strong>
+          <span><i className="online-dot" /> {session.mode === "CENTRAL" ? "跨设备实时同步" : "30 秒心跳"}</span>
+          <small>{session.mode === "CENTRAL" ? "公网安全连接" : "数据默认仅保存在本机"}</small>
+          {session.mode === "CENTRAL" && <button className="sidebar-logout" onClick={() => { api.logout(); window.location.reload(); }}>退出登录</button>}
         </div>
       </aside>
       <main className="main-content">{children}</main>
@@ -134,10 +148,11 @@ function StatusBadge({ state }: { state: TaskState }) {
 }
 
 function ErrorBanner({ message, retry }: { message?: string; retry?: () => void }) {
+  const session = useSession();
   if (!message) return null;
   return (
     <div className="error-banner" role="alert">
-      <div><strong>本机节点暂不可用</strong><span>{message}</span></div>
+      <div><strong>{session.mode === "CENTRAL" ? "中央服务暂不可用" : "本机节点暂不可用"}</strong><span>{message}</span></div>
       {retry && <button className="button secondary" onClick={retry}>重试</button>}
     </div>
   );
@@ -154,6 +169,7 @@ function EmptyState({ title, description }: { title: string; description: string
 }
 
 function DashboardPage() {
+  const session = useSession();
   const loader = useCallback(() => api.dashboard(), []);
   const { data, error, loading, refresh } = usePolling<DashboardData>(loader, 2_000);
   const cards: Array<[TaskState, string]> = [
@@ -217,13 +233,19 @@ function DashboardPage() {
       <section className="summary-strip">
         <div><span>24 小时完成率</span><strong>{data ? `${Math.round(data.completionRate24h * 100)}%` : "—"}</strong></div>
         <div><span>P95 执行时长</span><strong>{formatDuration(data?.p95DurationMs)}</strong></div>
-        <div><span>在线设备</span><strong>{data?.devices.length ?? 0}</strong></div>
+        <div><span>在线设备</span><strong>{data?.devices.filter((device) => device.online !== false && !device.revoked).length ?? 0}</strong></div>
       </section>
-      <SectionTitle title="工具接入" action={<NavLink to="/integrations">查看诊断</NavLink>} />
+      <SectionTitle
+        title="工具接入"
+        action={<NavLink to={session.mode === "CENTRAL" ? "/devices" : "/integrations"}>{session.mode === "CENTRAL" ? "管理设备" : "查看诊断"}</NavLink>}
+      />
       <section className="tool-grid">
         {(data?.adapters ?? []).map((adapter) => <AdapterCard adapter={adapter} key={adapter.provider} />)}
         {!loading && !data?.adapters.length && (
-          <EmptyState title="尚未发现工具" description="运行只读自检后会显示四个工具的安装和 Hook 状态。" />
+          <EmptyState
+            title="尚未发现工具"
+            description={session.mode === "CENTRAL" ? "设备接入并上报心跳后，会显示各电脑上的工具状态。" : "运行只读自检后会显示四个工具的安装和 Hook 状态。"}
+          />
         )}
       </section>
       <section className="two-column">
@@ -381,12 +403,16 @@ function TaskCard({ task }: { task: Task }) {
       <span className="task-card-main">
         <span className="task-card-title"><strong>{task.title}</strong><StatusBadge state={task.state} /></span>
         <span className="task-card-meta">{providerLabel[task.provider]} · {task.controlMode === "MANAGED" ? "托管会话" : "观察会话"} · 可信度 {task.confidence}</span>
-        <span className="task-card-meta">{task.workspace ?? "工作区未知"} · 证据 {task.evidenceLevel}/{task.requiredEvidenceLevel}</span>
+        <span className="task-card-meta">{task.workspace ?? "工作区未知"} · 设备 {compactDeviceId(task.deviceId)} · 证据 {task.evidenceLevel}/{task.requiredEvidenceLevel}</span>
       </span>
       <span className="task-card-time"><small>最近事件</small><strong>{timeAgo(task.updatedAt)}</strong><small>{formatDuration(task.durationMs)}</small></span>
       <span className="chevron">›</span>
     </NavLink>
   );
+}
+
+function compactDeviceId(value: string) {
+  return value.length > 14 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value;
 }
 
 function TaskDetailPage() {
@@ -468,6 +494,7 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
 }
 
 function ContinueTaskPage() {
+  const session = useSession();
   const { id } = useParams();
   const navigate = useNavigate();
   const loader = useCallback(() => api.task(id!), [id]);
@@ -483,7 +510,7 @@ function ContinueTaskPage() {
     ["SEND_NEXT", "当前回合停止后执行"],
     ["RESUME_AND_SEND", "立即恢复托管会话"],
     ["OPEN_AND_PREFILL", "复制任务，手动打开原会话"],
-  ].filter(([value]) => task?.capabilities.includes(value as never));
+  ].filter(([value]) => task?.capabilities.includes(value as never) && !(session.mode === "CENTRAL" && value === "OPEN_AND_PREFILL"));
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!message.trim()) return setFormError("请输入要发送的任务内容");
@@ -512,11 +539,167 @@ function ContinueTaskPage() {
         <div className="form-intro"><span className={`provider-icon ${task?.provider.toLowerCase()}`}>{task ? providerLabel[task.provider].slice(0, 2) : "AI"}</span><div><strong>{task?.sessionId ?? (loading ? "读取会话…" : "未知会话")}</strong><p>{task?.controlMode === "MANAGED" ? "托管会话：支持后台恢复" : "观察会话：能力会自动降级"}</p></div></div>
         <label><span>执行方式</span><select value={action} onChange={(event) => setAction(event.target.value)}>{availableActions.map(([value, description]) => <option key={value} value={value}>{value} · {description}</option>)}</select></label>
         <div className="form-row"><label><span>命令有效期</span><select value={ttl} onChange={(event) => setTtl(Number(event.target.value))}><option value={1800}>30 分钟</option><option value={7200}>2 小时</option><option value={28800}>8 小时</option><option value={86400}>24 小时</option></select></label><label><span>要求证据</span><input disabled value={task?.requiredEvidenceLevel ?? "E2"} /></label></div>
-        <label><span>任务内容</span><textarea rows={8} maxLength={32 * 1024} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="例如：继续运行完整测试；如果失败，请定位原因并修复后再次验证。" /><small>内容会在本机使用系统凭据保护的密钥加密；不会写入日志或通知。</small></label>
+        <label><span>任务内容</span><textarea rows={8} maxLength={32 * 1024} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="例如：继续运行完整测试；如果失败，请定位原因并修复后再次验证。" /><small>{session.mode === "CENTRAL" ? "内容经 HTTPS/WSS 传输，并在 ctyun PostgreSQL 中加密保存；不会写入日志或通知。" : "内容会在本机使用系统凭据保护的密钥加密；不会写入日志或通知。"}</small></label>
         <div className="security-note"><strong>权限边界</strong><p>该产品只投递用户消息，不会自动批准删除、发布、支付或绕过沙箱。敏感动作仍由原工具请求确认。</p></div>
         {formError && <p className="form-error">{formError}</p>}
         <footer><button type="button" className="button secondary" onClick={() => navigate(-1)}>取消</button><button className="button" disabled={submitting || !task}>{submitting ? "正在入队…" : "加入队列"}</button></footer>
       </form>
+    </AppShell>
+  );
+}
+
+function DevicesPage() {
+  const session = useSession();
+  return session.mode === "CENTRAL" ? <CentralDevicesPage /> : <LocalDevicePage />;
+}
+
+function CentralDevicesPage() {
+  const loader = useCallback(() => api.devices(), []);
+  const { data, error, loading, refresh } = usePolling(loader, 5_000);
+  const [enrollment, setEnrollment] = useState<{ code: string; expiresAt: string }>();
+  const [notice, setNotice] = useState<string>();
+  const [editingId, setEditingId] = useState<string>();
+  const [alias, setAlias] = useState("");
+  const [confirmRevoke, setConfirmRevoke] = useState<string>();
+  const online = data?.items.filter((device) => device.online && !device.revoked).length ?? 0;
+  const createCode = async () => {
+    try {
+      setEnrollment(await api.createEnrollmentCode());
+      setNotice("配对码已生成，15 分钟内可使用一次");
+    } catch (reason) {
+      setNotice(reason instanceof Error ? reason.message : "配对码生成失败");
+    }
+  };
+  const copyCode = async () => {
+    if (!enrollment) return;
+    await navigator.clipboard.writeText(enrollment.code);
+    setNotice("配对码已复制");
+  };
+  const saveAlias = async (device: Device) => {
+    if (!alias.trim()) return setNotice("设备名称不能为空");
+    try {
+      await api.renameDevice(device.id, alias.trim());
+      setEditingId(undefined);
+      setAlias("");
+      setNotice("设备名称已更新");
+      await refresh();
+    } catch (reason) {
+      setNotice(reason instanceof Error ? reason.message : "设备名称更新失败");
+    }
+  };
+  const revoke = async (device: Device) => {
+    if (confirmRevoke !== device.id) {
+      setConfirmRevoke(device.id);
+      setNotice(`再次点击“确认撤销”即可断开 ${device.alias ?? device.hostname}`);
+      return;
+    }
+    try {
+      await api.revokeDevice(device.id);
+      setConfirmRevoke(undefined);
+      setNotice("设备已撤销，原令牌立即失效");
+      await refresh();
+    } catch (reason) {
+      setNotice(reason instanceof Error ? reason.message : "设备撤销失败");
+    }
+  };
+  return (
+    <AppShell>
+      <PageHeader
+        title="设备中心"
+        subtitle="管理通过公网安全连接到 ctyun 的 Mac 与 Windows 节点"
+        action={<button className="button" onClick={() => void createCode()}>添加设备</button>}
+      />
+      <ErrorBanner message={error} retry={() => void refresh()} />
+      <section className="fleet-summary">
+        <div><span>设备总数</span><strong>{loading ? "—" : data?.items.length ?? 0}</strong></div>
+        <div><span>当前在线</span><strong>{loading ? "—" : online}</strong></div>
+        <div><span>连接方式</span><strong>WSS / 443</strong></div>
+      </section>
+      {enrollment && (
+        <section className="enrollment-card">
+          <div><span>一次性设备配对码</span><strong>{enrollment.code}</strong><small>{new Date(enrollment.expiresAt).toLocaleTimeString("zh-CN")} 前有效，使用一次后自动失效</small></div>
+          <button className="button" onClick={() => void copyCode()}>复制配对码</button>
+        </section>
+      )}
+      {notice && <p className="inline-notice success-notice">{notice}</p>}
+      <div className="device-grid">
+        {data?.items.map((device) => (
+          <article className={`device-card ${device.revoked ? "revoked" : ""}`} key={device.id}>
+            <header>
+              <span className={`device-os ${device.os}`}>{device.os === "macos" ? "Mac" : device.os === "windows" ? "Win" : device.os}</span>
+              <span className={`badge ${device.revoked ? "gray" : device.online ? "green" : "orange"}`}>{device.revoked ? "已撤销" : device.online ? "在线" : "离线"}</span>
+            </header>
+            {editingId === device.id ? (
+              <div className="device-edit"><input autoFocus maxLength={64} value={alias} onChange={(event) => setAlias(event.target.value)} /><button className="button" onClick={() => void saveAlias(device)}>保存</button><button className="button secondary" onClick={() => setEditingId(undefined)}>取消</button></div>
+            ) : (
+              <><h3>{device.alias ?? device.hostname}</h3><p>{device.hostname} · {device.arch} · Agent {device.nodeVersion}</p></>
+            )}
+            <dl><div><dt>环境</dt><dd>{device.logicalEnvironment}</dd></div><div><dt>最后心跳</dt><dd>{timeAgo(device.lastSeenAt)}</dd></div><div><dt>设备 ID</dt><dd className="mono">{compactDeviceId(device.id)}</dd></div></dl>
+            {!device.revoked && editingId !== device.id && <footer><button className="link-button" onClick={() => { setEditingId(device.id); setAlias(device.alias ?? device.hostname); }}>修改名称</button><button className={`link-button danger ${confirmRevoke === device.id ? "confirm" : ""}`} onClick={() => void revoke(device)}>{confirmRevoke === device.id ? "确认撤销" : "撤销设备"}</button></footer>}
+          </article>
+        ))}
+        {!loading && !data?.items.length && <EmptyState title="还没有连接设备" description="点击“添加设备”生成一次性配对码，然后在目标电脑的 AI 任务中控台中完成配对。" />}
+      </div>
+    </AppShell>
+  );
+}
+
+function LocalDevicePage() {
+  const deviceLoader = useCallback(() => api.devices(), []);
+  const { data, error, refresh } = usePolling(deviceLoader, 15_000);
+  const [central, setCentral] = useState<CentralStatus>();
+  const [serverUrl, setServerUrl] = useState("");
+  const [code, setCode] = useState("");
+  const [deviceAlias, setDeviceAlias] = useState("");
+  const [notice, setNotice] = useState<string>();
+  const [submitting, setSubmitting] = useState(false);
+  const loadCentral = useCallback(async () => setCentral(await api.centralStatus()), []);
+  useEffect(() => { void loadCentral(); }, [loadCentral]);
+  const connect = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!serverUrl.trim() || !code.trim()) return setNotice("请输入 ctyun 控制台地址和配对码");
+    setSubmitting(true);
+    try {
+      await api.connectCentral({ serverUrl: serverUrl.trim(), enrollmentCode: code.trim(), deviceAlias: deviceAlias.trim() || undefined });
+      setCode("");
+      setNotice("配对成功，节点将在数秒内建立 WSS 安全连接");
+      await loadCentral();
+    } catch (reason) {
+      setNotice(reason instanceof Error ? reason.message : "中央控制台配对失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const disconnect = async () => {
+    try {
+      await api.disconnectCentral();
+      setNotice("已清除本机中央连接凭据");
+      await loadCentral();
+    } catch (reason) {
+      setNotice(reason instanceof Error ? reason.message : "断开失败");
+    }
+  };
+  const device = data?.items[0];
+  return (
+    <AppShell>
+      <PageHeader title="本机与中央连接" subtitle="将这台电脑安全接入 ctyun，实现跨网络监控和任务下发" action={<button className="button secondary" onClick={() => void refresh()}>刷新</button>} />
+      <ErrorBanner message={error} retry={() => void refresh()} />
+      {device && <section className="node-card"><div><i className="online-dot large" /><div><strong>{device.hostname}</strong><span>{device.os} · {device.arch} · Agent v{device.nodeVersion}</span></div></div><span className="badge green">本机在线</span></section>}
+      {central?.configured ? (
+        <section className="central-connected-card">
+          <div><span className="live-kicker"><i className="live-pulse" /> 已接入 ctyun</span><h2>{central.deviceAlias}</h2><p>{central.serverUrl}</p><small>设备 ID：{central.deviceId}</small></div>
+          <button className="button secondary" onClick={() => void disconnect()}>断开中央连接</button>
+        </section>
+      ) : (
+        <form className="central-connect-form" onSubmit={(event) => void connect(event)}>
+          <div><h2>连接 ctyun 中央控制台</h2><p>在中央控制台“设备”页面生成一次性配对码。节点只建立出站 443/WSS 连接，无需开放本机端口。</p></div>
+          <label><span>中央控制台地址</span><input inputMode="url" value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="https://ai-control.example.com" /></label>
+          <div className="form-row"><label><span>一次性配对码</span><input autoCapitalize="characters" value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} placeholder="例如 A1B2C3D4E5" /></label><label><span>设备名称</span><input value={deviceAlias} onChange={(event) => setDeviceAlias(event.target.value)} placeholder={device?.hostname ?? "我的电脑"} /></label></div>
+          <div className="security-note"><strong>安全说明</strong><p>配对码使用一次即失效；设备令牌保存在系统钥匙串或 Credential Manager，中央端不能执行任意 shell。</p></div>
+          <button className="button full" disabled={submitting}>{submitting ? "正在安全配对…" : "连接中央控制台"}</button>
+        </form>
+      )}
+      {notice && <p className="inline-notice success-notice">{notice}</p>}
     </AppShell>
   );
 }
@@ -604,15 +787,79 @@ function NotFoundPage() {
   return <AppShell><PageHeader title="页面不存在" subtitle="该入口可能已经移动" /><EmptyState title="找不到页面" description="返回任务总览继续操作。" /><NavLink className="button inline" to="/">返回总览</NavLink></AppShell>;
 }
 
-export default function App() {
+function AuthenticatedApp() {
   return (
     <Routes>
       <Route path="/" element={<DashboardPage />} />
       <Route path="/tasks" element={<TasksPage />} />
       <Route path="/tasks/:id" element={<TaskDetailPage />} />
       <Route path="/tasks/:id/continue" element={<ContinueTaskPage />} />
+      <Route path="/devices" element={<DevicesPage />} />
       <Route path="/integrations" element={<IntegrationsPage />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
+}
+
+function LoginPage({ onLogin }: { onLogin: (session: SessionInfo) => void }) {
+  const [token, setToken] = useState("");
+  const [error, setError] = useState<string>();
+  const [submitting, setSubmitting] = useState(false);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!token.trim()) return setError("请输入管理员访问令牌");
+    setSubmitting(true);
+    try {
+      onLogin(await api.login(token));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "登录失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return (
+    <main className="login-page">
+      <section className="login-card">
+        <div className="login-brand"><span className="brand-mark">AI</span><span>AI 任务中控台</span></div>
+        <span className="login-cloud">ctyun Personal Sync</span>
+        <h1>管理所有电脑上的 AI 任务</h1>
+        <p>登录后可以查看设备在线状态、跟踪 Codex、Claude、Cursor 和 Antigravity，并安全地下达后续任务。</p>
+        <form onSubmit={(event) => void submit(event)}>
+          <label><span>管理员访问令牌</span><input type="password" autoFocus autoComplete="current-password" value={token} onChange={(event) => setToken(event.target.value)} placeholder="由服务器管理员提供" /></label>
+          {error && <p className="form-error">{error}</p>}
+          <button className="button full" disabled={submitting}>{submitting ? "正在验证…" : "登录控制台"}</button>
+        </form>
+        <small>令牌仅保存在当前浏览器，不会写入服务器日志。</small>
+      </section>
+    </main>
+  );
+}
+
+export default function App() {
+  const [session, setSession] = useState<SessionInfo>();
+  const [loading, setLoading] = useState(true);
+  const [loginRequired, setLoginRequired] = useState(false);
+  const [startupError, setStartupError] = useState<string>();
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const current = await api.session();
+      setSession(current.mode ? current : { mode: "LOCAL", authenticated: true, version: "0.2.0" });
+      setLoginRequired(false);
+      setStartupError(undefined);
+    } catch (reason) {
+      if (reason instanceof Error && "status" in reason && (reason as ApiError).status === 401) {
+        setLoginRequired(true);
+      } else {
+        setStartupError(reason instanceof Error ? reason.message : "无法连接服务");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  if (loading) return <main className="boot-page"><span className="brand-mark">AI</span><strong>正在连接任务中控台…</strong></main>;
+  if (loginRequired) return <LoginPage onLogin={(value) => { setSession(value); setLoginRequired(false); }} />;
+  if (!session || startupError) return <main className="boot-page"><span className="brand-mark">AI</span><strong>暂时无法连接</strong><p>{startupError}</p><button className="button" onClick={() => void load()}>重试</button></main>;
+  return <SessionContext.Provider value={session}><AuthenticatedApp /></SessionContext.Provider>;
 }

@@ -1,0 +1,17 @@
+{
+  "name": "AI 任务中控台",
+  "short_name": "AI 中控台",
+  "description": "跨设备监控和继续 Codex、Claude、Cursor 与 Antigravity AI 任务",
+  "start_url": "/#/",
+  "display": "standalone",
+  "background_color": "#f5f6f8",
+  "theme_color": "#2f5ee5",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

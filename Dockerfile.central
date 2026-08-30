@@ -1,0 +1,31 @@
+FROM node:24.12.0-bookworm-slim AS web
+WORKDIR /build/apps/desktop
+COPY apps/desktop/package.json apps/desktop/package-lock.json ./
+RUN npm ci
+COPY apps/desktop/ ./
+RUN npm run build
+
+FROM rust:1.98-bookworm AS rust
+WORKDIR /build
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates/ crates/
+COPY apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/Cargo.toml
+COPY apps/desktop/src-tauri/build.rs apps/desktop/src-tauri/build.rs
+COPY apps/desktop/src-tauri/src apps/desktop/src-tauri/src
+COPY apps/desktop/src-tauri/icons apps/desktop/src-tauri/icons
+COPY apps/desktop/src-tauri/tauri.conf.json apps/desktop/src-tauri/tauri.conf.json
+COPY --from=web /build/apps/desktop/dist apps/desktop/dist
+RUN cargo build --release -p ai-rpa-server
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --create-home ai-rpa
+COPY --from=rust /build/target/release/ai-rpa-server /usr/local/bin/ai-rpa-server
+COPY --from=web /build/apps/desktop/dist /opt/ai-rpa/ui
+USER 10001
+EXPOSE 8080
+ENV AI_RPA_BIND=0.0.0.0:8080 AI_RPA_UI_DIR=/opt/ai-rpa/ui
+HEALTHCHECK --interval=15s --timeout=3s --retries=5 CMD ["curl", "--fail", "http://127.0.0.1:8080/health"]
+ENTRYPOINT ["ai-rpa-server"]

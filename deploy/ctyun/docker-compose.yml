@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ai_rpa
+      POSTGRES_USER: ai_rpa
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_rpa -d ai_rpa"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+
+  server:
+    image: ${AI_RPA_IMAGE:-ai-rpa-central:local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile.central
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://ai_rpa:${POSTGRES_PASSWORD}@postgres:5432/ai_rpa
+      AI_RPA_ADMIN_TOKEN: ${AI_RPA_ADMIN_TOKEN:?set AI_RPA_ADMIN_TOKEN}
+      AI_RPA_DATA_KEY: ${AI_RPA_DATA_KEY:?set AI_RPA_DATA_KEY}
+      RUST_LOG: ${RUST_LOG:-ai_rpa_server=info,tower_http=info}
+    ports:
+      - "${AI_RPA_HOST_BIND:-127.0.0.1}:${AI_RPA_PORT:-8080}:8080"
+    networks: [backend]
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  postgres-data:

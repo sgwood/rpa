@@ -1,7 +1,7 @@
 # AI 任务中控台产品需求文档（PRD）
 
-> 文档版本：v1.0
-> 日期：2026-08-29
+> 文档版本：v1.1
+> 日期：2026-08-30
 > 产品暂定名：AI 任务中控台（AI Agent Control Center）
 > 适用平台：macOS、Windows Native、WSL
 > 接入工具：Codex、Claude、Cursor、Antigravity IDE
@@ -62,6 +62,7 @@ macOS 已完成一次四工具真实投递 PoC：Codex、Claude、Cursor、Antig
 | G-05 | 支持 macOS 与 Windows | macOS、Windows Native、WSL 均通过目标测试矩阵 |
 | G-06 | 保护隐私与凭据 | 日志和通知中不出现令牌、密钥、完整 Prompt 或非必要个人信息 |
 | G-07 | 监控故障不影响 AI 工具 | Collector 离线时 Hook 在超时内 fail-open |
+| G-08 | 跨网络管理个人多台电脑 | 节点仅以出站 443/WSS 接入 ctyun，PC/手机可查看状态并安全续派任务 |
 
 ### 4.2 非目标
 
@@ -158,6 +159,8 @@ DISCOVERED -> QUEUED -> RUNNING -> SUCCEEDED
 - 飞书交互卡片中的“打开任务”“排队下一步”“标记已处理”；
 - 团队 RBAC、设备撤销、审计导出；
 - 自动更新、灰度发布和回滚。
+
+其中 v0.2 Personal Sync 已交付单用户中央控制台、PostgreSQL、一次性配对、设备撤销、WSS、离线补传、加密远程命令和响应式 Web 管理；厂商深度托管、飞书交互卡片、团队 RBAC、自动更新仍属于后续迭代，不计入 v0.2 完成范围。
 
 ### 8.3 P2：增强版
 

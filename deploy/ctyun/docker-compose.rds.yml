@@ -1,0 +1,19 @@
+services:
+  server:
+    image: ${AI_RPA_IMAGE:-ai-rpa-central:local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile.central
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set the private ctyun RDS PostgreSQL URL}
+      AI_RPA_ADMIN_TOKEN: ${AI_RPA_ADMIN_TOKEN:?set AI_RPA_ADMIN_TOKEN}
+      AI_RPA_DATA_KEY: ${AI_RPA_DATA_KEY:?set AI_RPA_DATA_KEY}
+      RUST_LOG: ${RUST_LOG:-ai_rpa_server=info,tower_http=info}
+    ports:
+      - "${AI_RPA_HOST_BIND:-127.0.0.1}:${AI_RPA_PORT:-8080}:8080"
+    networks: [backend]
+
+networks:
+  backend:
+    driver: bridge

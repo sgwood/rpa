@@ -1,6 +1,11 @@
-import type { Dashboard, Diagnostics, Task, TaskDetail } from "./types";
+import type { CentralStatus, Dashboard, Device, Diagnostics, SessionInfo, Task, TaskDetail } from "./types";
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:3847/api";
+const isDesktopShell = window.location.protocol === "tauri:"
+  || window.location.hostname === "tauri.localhost"
+  || window.location.port === "1420";
+const API_BASE = import.meta.env.VITE_API_BASE
+  ?? (isDesktopShell ? "http://127.0.0.1:3847/api" : "/api");
+const TOKEN_KEY = "ai-rpa-central-token";
 
 export class ApiError extends Error {
   constructor(
@@ -12,10 +17,12 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = window.localStorage.getItem(TOKEN_KEY);
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
   });
@@ -27,6 +34,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  session: () => request<SessionInfo>("/session"),
+  login: async (token: string) => {
+    window.localStorage.setItem(TOKEN_KEY, token.trim());
+    try {
+      return await request<SessionInfo>("/session");
+    } catch (error) {
+      window.localStorage.removeItem(TOKEN_KEY);
+      throw error;
+    }
+  },
+  logout: () => window.localStorage.removeItem(TOKEN_KEY),
   dashboard: () => request<Dashboard>("/dashboard"),
   tasks: (query = "") => request<{ items: Task[] }>(`/tasks${query ? `?${query}` : ""}`),
   task: (id: string) => request<TaskDetail>(`/tasks/${id}`),
@@ -53,4 +71,28 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ webhook }),
     }),
+  devices: () => request<{ items: Device[] }>("/devices"),
+  createEnrollmentCode: () =>
+    request<{ code: string; expiresAt: string }>("/devices/enrollment-codes", {
+      method: "POST",
+      body: "{}",
+    }),
+  renameDevice: (id: string, alias: string) =>
+    request<{ updated: boolean }>(`/devices/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ alias }),
+    }),
+  revokeDevice: (id: string) =>
+    request<{ revoked: boolean }>(`/devices/${encodeURIComponent(id)}/revoke`, {
+      method: "POST",
+      body: "{}",
+    }),
+  centralStatus: () => request<CentralStatus>("/central/status"),
+  connectCentral: (input: { serverUrl: string; enrollmentCode: string; deviceAlias?: string }) =>
+    request<{ configured: boolean; deviceId: string }>("/central/connect", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  disconnectCentral: () =>
+    request<{ configured: boolean }>("/central/disconnect", { method: "POST", body: "{}" }),
 };

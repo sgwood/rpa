@@ -15,6 +15,60 @@ permissions:
   contents: read
 
 jobs:
+  central:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_DB: ai_rpa_test
+          POSTGRES_USER: ai_rpa
+          POSTGRES_PASSWORD: integration-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ai_rpa -d ai_rpa_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AI_RPA_TEST_DATABASE_URL: postgres://ai_rpa:integration-password@127.0.0.1:5432/ai_rpa_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.12.0
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Central PostgreSQL integration test
+        run: cargo test -p ai-rpa-server --test postgres_flow
+      - name: Build central web console
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run build
+      - name: Build central service
+        run: cargo build --release -p ai-rpa-server
+      - name: Validate ctyun compose
+        run: |
+          docker compose --env-file deploy/ctyun/.env.example -f deploy/ctyun/docker-compose.yml config --quiet
+          docker compose --env-file deploy/ctyun/.env.example -f deploy/ctyun/docker-compose.rds.yml config --quiet
+          docker compose --env-file deploy/ctyun/.env.example -f deploy/ctyun/docker-compose.postgres.yml config --quiet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-rpa-central-linux-x64
+          path: |
+            target/release/ai-rpa-server
+            apps/desktop/dist/**
+            deploy/ctyun/**
+          if-no-files-found: error
+          retention-days: 7
+
   verify:
     strategy:
       fail-fast: false

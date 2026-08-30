@@ -1,0 +1,46 @@
+name: verify-and-package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.0
+          components: rustfmt, clippy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.12.0
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+      - name: Rust format
+        run: cargo fmt --all -- --check
+      - name: Rust lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Rust tests
+        run: cargo test --workspace --no-fail-fast
+      - name: Frontend tests
+        working-directory: apps/desktop
+        run: npm test
+      - name: Build native bundle
+        working-directory: apps/desktop
+        run: npm run tauri build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-rpa-${{ matrix.os }}
+          path: target/release/bundle/**
+          if-no-files-found: error

@@ -130,8 +130,8 @@ DISCOVERED -> QUEUED -> RUNNING -> SUCCEEDED
 |---|---|---:|
 | `SEND_NEXT` | 当前回合结束后，把命令作为下一条用户消息执行 | 是 |
 | `RESUME_AND_SEND` | 恢复指定历史会话并发送新任务 | 托管会话是；观察会话逐工具开放 |
-| `STEER_ACTIVE` | 向正在执行的回合追加信息 | Codex 是；其他工具按能力降级 |
-| `OPEN_AND_PREFILL` | 打开原会话并预填任务，由用户确认发送 | 是，作为 GUI 降级能力 |
+| `STEER_ACTIVE` | 向正在执行的回合追加信息 | P1；P0 不对外宣称此能力 |
+| `OPEN_AND_PREFILL` | 打开工具/工作区并复制任务，由用户粘贴确认 | 是，作为安全的 GUI 降级能力；不模拟粘贴或回车 |
 
 ## 8. 产品范围与优先级
 

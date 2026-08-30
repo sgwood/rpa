@@ -7,29 +7,28 @@
 
 ## 1. 技术决策摘要
 
-首版采用“**本机节点 + 可选中央控制面 + Web 控制台**”架构。
+首版采用“**Rust 本机节点 + Tauri 桌面壳 + React 控制台 + SQLite**”的本地优先架构。
 
-- 本机节点使用 **Go**：编译为单文件，适合 macOS/Windows 常驻、Hook 快速启动、并发采集和跨平台分发；
-- Web 控制台使用 **TypeScript + React + Vite**：组件生态成熟，便于制作任务时间线、筛选和飞书卡片跳转页；
-- 本地状态使用 **SQLite**：离线可用、事务与幂等能力足够，不要求用户安装数据库；
-- 中央服务使用 **Go + PostgreSQL**：复用领域模型，同时支持多设备汇总、审计和远程命令；
-- 节点只建立出站 **HTTPS/WSS** 连接，避免给个人电脑开放入站端口；
-- MVP 使用数据库事务 Outbox，不引入消息队列；吞吐或团队规模达到阈值后再评估 NATS JetStream；
-- 状态由确定性状态机判断，模型只生成摘要，不能决定任务是否成功；
-- 厂商正式 Hook、CLI、SDK、App Server、Cloud API 优先，GUI 自动化只做显式降级。
+- 原生核心使用 **Rust 1.98**：同一套领域代码覆盖 macOS、Windows、CLI、Hook 和 Tauri；
+- 桌面端使用 **Tauri 2 + TypeScript + React + Vite**：复用系统 WebView，包体和常驻资源小于 Electron 路线；
+- 本地状态使用 **SQLite WAL**：事件、任务快照、命令、审计和 Outbox 在事务中一致更新；
+- 密钥进入 **macOS Keychain / Windows Credential Manager**，命令正文用 AES-256-GCM 加密；
+- 本地 API 只监听 `127.0.0.1:3847`，Tauri、Hook CLI 与浏览器开发环境使用同一接口；
+- 状态由确定性状态机判断，模型文本不能越过配置的 E2/E3 证据门槛；
+- P0 不依赖中央服务。多设备云同步、团队 RBAC 和远程命令保留到 P1。
 
-Go、Node.js、依赖和安装器工具均选择开发时的最新稳定版，并通过 `go.mod`、锁文件和构建镜像固定；不在架构文档中硬编码容易过时的小版本。
+Rust、Node.js 和依赖由 `rust-toolchain.toml`、`Cargo.lock`、`.nvmrc`、`package-lock.json` 固定。
 
-## 2. 为什么选择 Go
+## 2. 为什么选择 Rust + Tauri
 
-| 关注点 | Go | Electron/纯 Node.js | Rust | 结论 |
+| 关注点 | Rust + Tauri | Electron/纯 Node.js | Go + Web UI | 结论 |
 |---|---|---|---|---|
-| macOS/Windows 单文件分发 | 好 | 通常需要较大运行包 | 好 | Go/Rust 更合适 |
-| Hook 冷启动和资源占用 | 低 | 中 | 最低 | Go 足够 |
-| HTTP、WSS、SQLite、并发 | 成熟 | 成熟 | 成熟但开发成本较高 | Go 平衡最好 |
-| 系统服务与 CLI | 成熟 | 一般 | 成熟 | Go |
-| 团队学习和迭代速度 | 较低门槛 | 最低门槛 | 较高门槛 | Go |
-| 内存安全 | GC + 类型安全 | GC + 动态边界较多 | 最强 | 首版 Go，安全敏感模块加强测试 |
+| macOS/Windows 原生分发 | 好，Tauri 直接产出 DMG/MSI/NSIS | 包体大、需捆绑 Chromium | 后端好，桌面壳需另选 | Rust + Tauri |
+| Hook 冷启动与常驻资源 | 低 | 中 | 低 | Rust/Go 均可 |
+| 内存与并发安全 | 编译期强保证 | 运行时边界较多 | GC + 类型安全 | Rust 最强 |
+| SQLite、HTTP、加密、系统凭据 | 生态成熟 | 生态成熟 | 生态成熟 | 均可 |
+| 移动端演进 | Tauri 2 可共享前端与 Rust Core | 需另建移动端 | 需另建移动端 | Tauri 更连贯 |
+| 工程复杂度 | 较高，但领域与壳统一 | 前端团队上手快 | 双技术栈且需额外桌面壳 | 接受 Rust 成本 |
 
 不建议用 Python 作为常驻核心：它适合 PoC 和 UI 辅助脚本，但跨平台打包、解释器/依赖管理和长期后台运行的交付成本更高。Python 可保留为可选的 UI 自动化插件进程，不进入可信状态判定链。
 
@@ -47,7 +46,7 @@ Antigravity Hook/CLI ──┘          │                    │              
                                                                         │
                                                     outbound HTTPS/WSS  │
                                                                         v
-                                                    Central Control Plane
+                                                    P1 Central Control Plane
                                                     PostgreSQL / API / Feishu
                                                                         │
                                                                         v
@@ -58,9 +57,9 @@ Antigravity Hook/CLI ──┘          │                    │              
 
 1. `ai-rpa-node`：每个登录用户一个常驻进程，负责事件、状态、命令和本地存储；
 2. `ai-rpa hook <provider> <event>`：极轻量 Hook 入口，把标准输入转发给节点后立即退出；
-3. `ai-rpa-server`：可选中央服务，负责设备同步、用户权限、飞书通知和 Web API；
-4. `ai-rpa-ui`：React 控制台；本地版静态资源可嵌入节点，团队版由中央服务托管；
-5. `ui-driver-*`：可选、隔离的 GUI 辅助进程，默认不安装，不参与成功判定。
+3. `ai-rpa-desktop`：Tauri 原生程序；正常启动显示 UI，携带 CLI 子命令时作为后台节点或 Hook 运行；
+4. `apps/desktop`：React 控制台和响应式移动布局；
+5. 中央服务和 GUI 输入驱动不进入 P0，后续作为独立进程引入。
 
 ### 3.2 部署模式
 
@@ -75,27 +74,20 @@ Antigravity Hook/CLI ──┘          │                    │              
 推荐目录结构：
 
 ```text
-cmd/ai-rpa/                 CLI、Hook Shim、服务入口
-internal/adapter/           codex、claude、cursor、antigravity
-internal/discovery/         安装、进程、版本和配置发现
-internal/event/             统一事件模型、校验、去重
-internal/state/             确定性状态机
-internal/evidence/          结果与证据判定
-internal/command/           队列、租约、投递、重试
-internal/store/             SQLite/PostgreSQL repository
-internal/outbox/            可靠同步与通知
-internal/redact/            凭据和隐私脱敏
-internal/transport/         IPC、HTTPS、WSS、mTLS
-internal/notify/            飞书与本机通知
-web/                        React 控制台
-testdata/providers/         脱敏事件 Golden Fixtures
+crates/core/                统一模型、厂商映射、状态机、脱敏
+crates/store/               SQLite、加密命令、租约、审计、Outbox
+crates/node/                API、CLI、Hook、发现、通知、诊断、命令运行器
+apps/desktop/               React/Vite 控制台
+apps/desktop/src-tauri/     Tauri 壳、内嵌本机节点、原生打包
+scripts/                    macOS/Windows 安装卸载与验证脚本
+.github/workflows/          双平台验证与原生包构建
 ```
 
 ### 4.1 IPC
 
-- macOS：`Unix Domain Socket`，目录权限 `0700`、Socket 权限 `0600`；
-- Windows：当前用户 ACL 限制的 `Named Pipe`；
-- 调试降级：仅监听 `127.0.0.1` 的随机端口，并要求短期令牌；
+- P0：固定监听 `127.0.0.1:3847`，拒绝非 loopback bind，并限制 Tauri/本机开发 Origin；
+- 数据目录权限在 Unix 上设为 `0700`，spool 文件设为 `0600`；
+- P1：迁移到 Unix Domain Socket / Windows Named Pipe，并增加当前用户 ACL；
 - Hook 总时限默认 800 ms，转发超过 500 ms 即落本机 spool 或 fail-open；
 - Hook 的标准输出必须严格符合对应厂商协议，诊断日志只写标准错误或节点日志。
 
@@ -142,7 +134,7 @@ testdata/providers/         脱敏事件 Golden Fixtures
 
 | 工具 | 首选状态入口 | `SEND_NEXT` | 历史会话恢复 | 执行中追加 | 关键边界 |
 |---|---|---|---|---|---|
-| Codex | Hooks；托管模式用 App Server | Stop Hook 或 `turn/start` | `thread/resume` | `turn/steer` | `turn/steer` 必须匹配当前活动 `turnId` |
+| Codex | Hooks；P0 托管模式用 CLI | Stop Hook | `codex exec resume` | P1 使用 `turn/steer` | P0 不宣称活动回合插话能力 |
 | Claude | Hooks；托管模式用 CLI/SDK | Stop Hook 返回 block/reason 后继续，或 CLI 新消息 | `--resume` / session ID | 默认排队；可选能力单独探测 | Stop Hook 必须处理重复触发保护 |
 | Cursor IDE | 本机 Hooks | `stop` 的 `followup_message` | 仅承诺产品登记的可恢复会话 | 默认排队 | 不承诺任意手工 IDE Chat 的稳定恢复 |
 | Cursor Cloud | v1 API 状态查询/SSE | 新建后续 Run | Durable Agent 上下文 | busy 时排队重试 | v1 为 Public Beta；v1 Webhook 尚未开放 |
@@ -153,8 +145,8 @@ testdata/providers/         脱敏事件 Golden Fixtures
 ### 5.2 Codex
 
 - 观察模式：接收 Stop、SessionEnd 等 Hook；
-- 托管模式：通过 App Server 创建/恢复 thread，使用 `turn/start` 下发任务；
-- 活动回合追加：使用 `turn/steer`，携带当前预期 `turnId`；不匹配则返回冲突并转为 `SEND_NEXT`；
+- P0 托管模式：使用 `codex exec resume <session-id> - --json`，任务正文通过 stdin 传入，避免出现在进程参数中；
+- P1 再接入 App Server 的 `thread/resume`、`turn/start` 和 `turn/steer`；活动回合追加必须携带当前预期 `turnId`，不匹配则返回冲突并转为 `SEND_NEXT`；
 - 状态判定：Hook 只表示生命周期节点；结果、工具错误和项目验证证据共同决定终态；
 - 会话入口和项目工作区映射必须由正式返回值登记，不解析或改写 Codex 内部数据库。
 
@@ -270,13 +262,17 @@ CREATED -> QUEUED -> LEASED -> DELIVERED -> ACCEPTED -> COMPLETED
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `POST` | `/v1/events` | Hook/适配器提交事件 |
-| `GET` | `/v1/tasks` | 本机任务列表 |
-| `GET` | `/v1/tasks/{id}` | 任务详情、时间线和证据 |
-| `POST` | `/v1/sessions/{id}/commands` | 创建继续任务 |
-| `POST` | `/v1/commands/{id}/cancel` | 取消未投递命令 |
-| `GET` | `/v1/health` | 活性与就绪检查 |
-| `POST` | `/v1/diagnostics` | 生成脱敏诊断包 |
+| `POST` | `/api/events` | Hook/适配器提交事件 |
+| `GET` | `/api/tasks` | 本机任务列表与筛选 |
+| `GET` | `/api/tasks/{id}` | 任务详情、时间线、命令和审计 |
+| `POST` | `/api/tasks/{id}/commands` | 创建继续任务 |
+| `POST` | `/api/tasks/{id}/open` | 打开对应工具/工作区 |
+| `POST` | `/api/hooks/install` | 备份并幂等合并四工具 Hook |
+| `POST` | `/api/hooks/uninstall` | 只移除本产品 Hook 条目 |
+| `GET` | `/api/health` | 活性检查 |
+| `GET` | `/api/diagnostics/export` | 下载脱敏诊断 JSON |
+| `POST` | `/api/settings/feishu` | 把 Webhook 写入系统凭据库 |
+| `POST` | `/api/notifications/flush` | 立即处理通知 Outbox |
 
 本地 API 默认只通过 UDS/Named Pipe 开放。调试 HTTP API 使用当前用户短期令牌与严格 Origin 检查。
 
@@ -380,14 +376,14 @@ CREATED -> QUEUED -> LEASED -> DELIVERED -> ACCEPTED -> COMPLETED
 
 ## 15. 交付阶段
 
-### 阶段 A：事件内核（2 周）
+### 阶段 A：事件内核（首版已实现）
 
-- Go 工程、SQLite migration、统一事件和状态机；
+- Rust workspace、SQLite schema、统一事件和状态机；
 - Hook Shim、幂等、Outbox、脱敏日志；
 - 四厂商脱敏 Fixture 与契约测试；
 - 本机 CLI 状态查询。
 
-### 阶段 B：本机 MVP（2 周）
+### 阶段 B：本机 MVP（代码已实现，RC 真机门禁待完成）
 
 - 四适配器真实接入；
 - `SEND_NEXT`、命令账本和恢复；
@@ -395,9 +391,9 @@ CREATED -> QUEUED -> LEASED -> DELIVERED -> ACCEPTED -> COMPLETED
 - macOS/Windows 安装、升级、卸载；
 - 飞书单用户通知。
 
-### 阶段 C：多设备 Beta（2～3 周）
+### 阶段 C：多设备 Beta（P1，未实现）
 
-- 中央 Go 服务、PostgreSQL、设备注册、WSS；
+- 中央 Rust 服务、PostgreSQL、设备注册、WSS；
 - 多设备任务和远程命令；
 - RBAC、审计、飞书卡片；
 - Windows Native、WSL、睡眠/断网和 72 小时稳定性测试。

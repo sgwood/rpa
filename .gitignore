@@ -1,5 +1,16 @@
+/target/
+/release/
+node_modules/
+/apps/desktop/dist/
+/apps/desktop/src-tauri/gen/
+/.ai-rpa/
+*.db
+*.db-shm
+*.db-wal
+*.diagnostics.zip
+.env
+.env.local
 .DS_Store
-
-# 本机 RPA 验证证据可能包含企业源码、个人路径和会话信息，不上传 GitHub。
-runs/**/*.png
-runs/**/*-sent-at.txt
+/runs/**/*.png
+/runs/**/*-at.txt
+/runs/**/*.jsonl

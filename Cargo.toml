@@ -9,7 +9,7 @@ license = "Apache-2.0"
 repository = "https://github.com/sgwood/rpa"
 
 [workspace.dependencies]
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22"

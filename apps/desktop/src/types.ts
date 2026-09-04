@@ -38,6 +38,36 @@ export interface CentralStatus {
   deviceAlias?: string;
   deviceId: string;
 }
+
+export type CodexAvailability = "READY" | "NOT_INSTALLED" | "NOT_AUTHENTICATED" | "BROKEN";
+
+export interface CodexStatus {
+  state: CodexAvailability;
+  version?: string;
+  executable?: string;
+  authenticated: boolean;
+  message: string;
+}
+
+export interface CodexProject {
+  id: string;
+  name: string;
+  path: string;
+  createdAt: string;
+}
+
+export interface CodexRunAssignment {
+  projectId: string;
+  projectName: string;
+  taskId: string;
+  sessionId: string;
+  state: "RUNNING";
+}
+
+export interface CodexRunResponse {
+  assignments: CodexRunAssignment[];
+  errors: Array<{ projectId: string; projectName: string; message: string }>;
+}
 export interface Adapter {
   provider: Provider;
   installState: string;

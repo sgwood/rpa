@@ -1,5 +1,6 @@
 pub mod api;
 pub mod cli;
+pub mod codex;
 pub mod command_runner;
 pub mod config;
 pub mod diagnostics;

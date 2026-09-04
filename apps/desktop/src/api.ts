@@ -1,4 +1,15 @@
-import type { CentralStatus, Dashboard, Device, Diagnostics, SessionInfo, Task, TaskDetail } from "./types";
+import type {
+  CentralStatus,
+  CodexProject,
+  CodexRunResponse,
+  CodexStatus,
+  Dashboard,
+  Device,
+  Diagnostics,
+  SessionInfo,
+  Task,
+  TaskDetail,
+} from "./types";
 
 const isDesktopShell = window.location.protocol === "tauri:"
   || window.location.hostname === "tauri.localhost"
@@ -95,4 +106,29 @@ export const api = {
     }),
   disconnectCentral: () =>
     request<{ configured: boolean }>("/central/disconnect", { method: "POST", body: "{}" }),
+  codexStatus: () => request<CodexStatus>("/codex/status"),
+  codexProjects: () => request<{ items: CodexProject[] }>("/codex/projects"),
+  registerCodexProject: (input: { name: string; path: string }) =>
+    request<{ project: CodexProject }>("/codex/projects", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  deleteCodexProject: (id: string) =>
+    request<{ deleted: boolean }>(`/codex/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  codexTasks: (projectIds: string[]) => {
+    const query = projectIds.length
+      ? `?projectIds=${encodeURIComponent(projectIds.join(","))}`
+      : "";
+    return request<{ items: Task[] }>(`/codex/tasks${query}`);
+  },
+  startCodexRuns: (input: {
+    title: string;
+    prompt: string;
+    projectIds: string[];
+    timeoutSeconds: 3600 | 7200 | 10800;
+    sandbox: "read-only" | "workspace-write";
+  }) => request<CodexRunResponse>("/codex/runs", {
+    method: "POST",
+    body: JSON.stringify(input),
+  }),
 };

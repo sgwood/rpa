@@ -152,4 +152,52 @@ describe("desktop console", () => {
     expect(screen.getAllByText("在线").length).toBeGreaterThan(0);
     expect(screen.getAllByText("设备").length).toBeGreaterThan(0);
   });
+
+  it("assigns one Codex task to every selected project", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      let body: unknown = {};
+      if (url.endsWith("/session")) {
+        body = { mode: "LOCAL", authenticated: true, version: "0.2.0" };
+      } else if (url.endsWith("/codex/status")) {
+        body = { state: "READY", version: "codex-cli 0.151.0", authenticated: true, message: "Codex CLI 可用且已登录，可以分配任务。" };
+      } else if (url.endsWith("/codex/projects")) {
+        body = { items: [
+          { id: "project-a", name: "RPA 控制台", path: "/code/rpa", createdAt: new Date().toISOString() },
+          { id: "project-b", name: "服务端", path: "/code/server", createdAt: new Date().toISOString() },
+        ] };
+      } else if (url.includes("/codex/tasks")) {
+        body = { items: [] };
+      } else if (url.endsWith("/codex/runs") && init?.method === "POST") {
+        body = {
+          assignments: [
+            { projectId: "project-a", projectName: "RPA 控制台", taskId: "task-a", sessionId: "session-a", state: "RUNNING" },
+            { projectId: "project-b", projectName: "服务端", taskId: "task-b", sessionId: "session-b", state: "RUNNING" },
+          ],
+          errors: [],
+        };
+      }
+      return new Response(JSON.stringify(body), { status: url.endsWith("/codex/runs") ? 202 : 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MemoryRouter initialEntries={["/codex"]}><App /></MemoryRouter>);
+
+    expect(await screen.findByRole("heading", { name: "Codex 项目任务" })).toBeInTheDocument();
+    expect(await screen.findByText("可分配")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /RPA 控制台/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /服务端/ }));
+    fireEvent.change(screen.getByLabelText("任务名称"), { target: { value: "检查构建" } });
+    fireEvent.change(screen.getByPlaceholderText("明确说明目标、限制条件和验收方式。"), { target: { value: "运行测试并汇总结果" } });
+    fireEvent.click(screen.getByRole("button", { name: "分配到 2 个项目" }));
+
+    expect(await screen.findByText("已向 2 个项目分别创建独立 Codex 任务。" )).toBeInTheDocument();
+    const runCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/codex/runs"));
+    expect(runCall).toBeDefined();
+    expect(JSON.parse(String(runCall?.[1]?.body))).toMatchObject({
+      title: "检查构建",
+      projectIds: ["project-a", "project-b"],
+      timeoutSeconds: 3600,
+      sandbox: "read-only",
+    });
+  });
 });

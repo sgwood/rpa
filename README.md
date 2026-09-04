@@ -158,14 +158,16 @@ ai-rpa connect \
 
 ## 文档
 
+- [安装与使用操作手册](USER_MANUAL.md)
 - [产品需求文档（PRD）](PRODUCT_PRD.md)
+- [中央待办与单机执行设计](TODO_TASK_DESIGN.md)
 - [完整技术可行性分析](AI_TASK_RPA_FEASIBILITY.md)
 - [技术实施方案](TECHNICAL_IMPLEMENTATION.md)
 - [测试与验证计划](TEST_PLAN.md)
 - [首版功能与验证状态](IMPLEMENTATION_STATUS.md)
 - [macOS 四工具实测摘要](runs/20260829-model-probe/summary.md)
 
-推荐阅读顺序：PRD → 技术实施方案 → 测试与验证计划 → 可行性分析与 PoC 证据。
+推荐阅读顺序：安装与使用操作手册 → PRD → 技术实施方案 → 测试与验证计划 → 可行性分析与 PoC 证据。
 
 ## 参与贡献
 

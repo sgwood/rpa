@@ -253,6 +253,30 @@ label small { color: var(--muted); font-weight: 400; line-height: 1.5; }
 .central-connect-form { display: grid; gap: 18px; }
 .central-connect-form h2 { margin-bottom: 7px; font-size: 20px; }
 .central-connect-form > div:first-child p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.codex-readiness { margin-bottom: 20px; padding: 18px 20px; display: flex; align-items: center; gap: 15px; background: #fff; border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+.codex-readiness.ready { border-color: #bfe6cd; background: linear-gradient(135deg, #f1fbf5, #fff 62%); }
+.codex-readiness.broken { border-color: #f2c8c4; background: linear-gradient(135deg, #fff4f3, #fff 62%); }
+.codex-readiness > div { flex: 1; min-width: 0; }
+.codex-readiness h2 { margin: 6px 0 3px; font-size: 18px; }
+.codex-readiness p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.codex-readiness small { display: block; margin-top: 6px; color: #8b8e97; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.codex-layout { margin-bottom: 24px; display: grid; grid-template-columns: minmax(340px, .8fr) minmax(0, 1.2fr); gap: 16px; align-items: start; }
+.codex-project-column { min-width: 0; }
+.codex-project-list { margin-bottom: 12px; display: grid; gap: 8px; }
+.codex-project-card { min-width: 0; padding: 13px; display: flex; align-items: center; gap: 11px; background: #fff; border: 1px solid var(--border); border-radius: 11px; box-shadow: 0 4px 16px rgba(34,39,52,.035); cursor: pointer; }
+.codex-project-card.selected { border-color: #8ca6ed; background: #f6f8ff; box-shadow: 0 0 0 2px #e8edff; }
+.codex-project-card > input { width: 17px; min-height: 17px; margin: 0; padding: 0; flex: none; accent-color: var(--brand); }
+.codex-project-copy { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.codex-project-copy strong, .codex-project-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.codex-project-copy strong { color: var(--text); font-size: 13px; }
+.codex-project-copy small { color: var(--muted); font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.codex-project-card .danger { color: var(--red); font-size: 11px; }
+.codex-project-form, .codex-run-form { padding: 20px; display: grid; gap: 16px; background: #fff; border: 1px solid var(--border); border-radius: 13px; box-shadow: var(--shadow); }
+.codex-project-form h3, .codex-run-form h2 { margin: 0; }
+.codex-project-form h3 { font-size: 15px; }
+.codex-run-form h2 { margin-bottom: 6px; font-size: 19px; }
+.codex-run-form > div:first-child p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.codex-run-form .success-notice { margin: 0; text-align: left; }
 .login-page, .boot-page { min-height: 100vh; padding: 24px; display: grid; place-items: center; background: radial-gradient(circle at top left, #edf3ff, transparent 38%), var(--bg); }
 .login-card { width: min(100%, 440px); padding: 34px; background: #fff; border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 20px 60px rgba(34, 47, 78, .12); }
 .login-brand { display: flex; align-items: center; gap: 11px; font-size: 16px; font-weight: 760; }
@@ -322,6 +346,9 @@ label small { color: var(--muted); font-weight: 400; line-height: 1.5; }
   .device-grid { grid-template-columns: 1fr; }
   .device-card footer .link-button { min-height: 40px; padding: 0 8px; }
   .central-connect-form, .central-connected-card { padding: 18px; }
+  .codex-layout { grid-template-columns: 1fr; }
+  .codex-project-form, .codex-run-form { padding: 18px; }
+  .codex-project-card .link-button { min-height: 38px; padding: 0 5px; }
   .login-page { padding: 14px; }
   .login-card { padding: 25px 20px; }
   .login-card h1 { font-size: 24px; }

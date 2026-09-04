@@ -10,7 +10,7 @@ use axum::{
     extract::{DefaultBodyLimit, Path, Query, State},
     http::{HeaderValue, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 use tower_http::{cors::CorsLayer, services::ServeDir, trace::TraceLayer};
 use uuid::Uuid;
 
-use crate::{AppState, diagnostics, discovery, hook_install, notify};
+use crate::{AppState, codex, diagnostics, discovery, hook_install, notify};
 
 pub fn router(state: AppState) -> Router {
     let api = Router::new()
@@ -41,7 +41,15 @@ pub fn router(state: AppState) -> Router {
         .route("/notifications/flush", post(flush_notifications))
         .route("/central/status", get(central_status))
         .route("/central/connect", post(central_connect))
-        .route("/central/disconnect", post(central_disconnect));
+        .route("/central/disconnect", post(central_disconnect))
+        .route("/codex/status", get(codex::status))
+        .route(
+            "/codex/projects",
+            get(codex::projects).post(codex::register_project),
+        )
+        .route("/codex/projects/{id}", delete(codex::delete_project))
+        .route("/codex/tasks", get(codex::tasks))
+        .route("/codex/runs", post(codex::start_runs));
     let mut app = Router::new()
         .nest("/api", api)
         .layer(DefaultBodyLimit::max(1024 * 1024))
@@ -71,12 +79,16 @@ pub fn router(state: AppState) -> Router {
 pub struct ApiError(anyhow::Error, StatusCode);
 
 impl ApiError {
-    fn bad_request(error: impl Into<anyhow::Error>) -> Self {
+    pub(crate) fn bad_request(error: impl Into<anyhow::Error>) -> Self {
         Self(error.into(), StatusCode::BAD_REQUEST)
     }
 
-    fn not_found(message: &str) -> Self {
+    pub(crate) fn not_found(message: &str) -> Self {
         Self(anyhow::anyhow!(message.to_owned()), StatusCode::NOT_FOUND)
+    }
+
+    pub(crate) fn unavailable(error: impl Into<anyhow::Error>) -> Self {
+        Self(error.into(), StatusCode::SERVICE_UNAVAILABLE)
     }
 }
 

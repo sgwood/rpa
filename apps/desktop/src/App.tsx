@@ -32,6 +32,9 @@ import {
 import type {
   Adapter,
   CentralStatus,
+  CodexAvailability,
+  CodexProject,
+  CodexStatus,
   Dashboard as DashboardData,
   Device,
   Diagnostics as DiagnosticsData,
@@ -78,7 +81,7 @@ function AppShell({ children }: { children: ReactNode }) {
     ["/tasks", "任务", "02"],
     ["/tasks?state=WAITING_USER", "等待处理", "03"],
     ["/devices", "设备", "04"],
-    ...(session.mode === "LOCAL" ? [["/integrations", "本机接入", "05"]] : []),
+    ...(session.mode === "LOCAL" ? [["/codex", "Codex 分配", "05"], ["/integrations", "本机接入", "06"]] : []),
   ];
   return (
     <div className="app-shell">
@@ -704,6 +707,170 @@ function LocalDevicePage() {
   );
 }
 
+const codexAvailabilityMeta: Record<CodexAvailability, { label: string; tone: string }> = {
+  READY: { label: "可分配", tone: "green" },
+  NOT_INSTALLED: { label: "未安装", tone: "orange" },
+  NOT_AUTHENTICATED: { label: "未登录", tone: "orange" },
+  BROKEN: { label: "安装损坏", tone: "red" },
+};
+
+function CodexAssignmentPage() {
+  const statusLoader = useCallback(() => api.codexStatus(), []);
+  const projectsLoader = useCallback(() => api.codexProjects(), []);
+  const { data: status, error: statusError, refresh: refreshStatus } = usePolling<CodexStatus>(statusLoader, 15_000);
+  const { data: projectsData, error: projectsError, loading: projectsLoading, refresh: refreshProjects } = usePolling(projectsLoader, 10_000);
+  const projects = projectsData?.items ?? [];
+  const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
+  const taskLoader = useCallback(() => api.codexTasks(selectedProjects), [selectedProjects]);
+  const { data: taskData, error: taskError, loading: tasksLoading, refresh: refreshTasks } = usePolling(taskLoader, 3_000);
+  const [projectName, setProjectName] = useState("");
+  const [projectPath, setProjectPath] = useState("");
+  const [title, setTitle] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [timeoutSeconds, setTimeoutSeconds] = useState<3600 | 7200 | 10800>(3600);
+  const [sandbox, setSandbox] = useState<"read-only" | "workspace-write">("read-only");
+  const [savingProject, setSavingProject] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState<string>();
+  const [formError, setFormError] = useState<string>();
+  const availability = status ? codexAvailabilityMeta[status.state] : undefined;
+
+  const toggleProject = (id: string) => {
+    setSelectedProjects((current) => current.includes(id)
+      ? current.filter((item) => item !== id)
+      : current.length < 8 ? [...current, id] : current);
+  };
+
+  const addProject = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!projectName.trim() || !projectPath.trim()) {
+      return setFormError("请输入项目名称和本机 Git 项目目录");
+    }
+    setSavingProject(true);
+    setFormError(undefined);
+    try {
+      const result = await api.registerCodexProject({ name: projectName.trim(), path: projectPath.trim() });
+      setProjectName("");
+      setProjectPath("");
+      setSelectedProjects((current) => current.includes(result.project.id) ? current : [...current, result.project.id]);
+      setNotice(`已登记并选中项目“${result.project.name}”`);
+      await refreshProjects();
+    } catch (reason) {
+      setFormError(reason instanceof Error ? reason.message : "项目登记失败");
+    } finally {
+      setSavingProject(false);
+    }
+  };
+
+  const removeProject = async (project: CodexProject) => {
+    try {
+      await api.deleteCodexProject(project.id);
+      setSelectedProjects((current) => current.filter((id) => id !== project.id));
+      setNotice(`已移除项目“${project.name}”；历史任务仍保留在任务账本中。`);
+      await refreshProjects();
+    } catch (reason) {
+      setFormError(reason instanceof Error ? reason.message : "项目移除失败");
+    }
+  };
+
+  const startRuns = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!title.trim() || !prompt.trim()) return setFormError("请输入任务名称和任务内容");
+    if (!selectedProjects.length) return setFormError("请至少选择一个项目");
+    setSubmitting(true);
+    setFormError(undefined);
+    setNotice(undefined);
+    try {
+      const result = await api.startCodexRuns({
+        title: title.trim(),
+        prompt,
+        projectIds: selectedProjects,
+        timeoutSeconds,
+        sandbox,
+      });
+      const failed = result.errors.length ? `，${result.errors.length} 个项目启动失败` : "";
+      setNotice(`已向 ${result.assignments.length} 个项目分别创建独立 Codex 任务${failed}。`);
+      setPrompt("");
+      await refreshTasks();
+    } catch (reason) {
+      setFormError(reason instanceof Error ? reason.message : "Codex 任务启动失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <AppShell>
+      <PageHeader
+        title="Codex 项目任务"
+        subtitle="在一个或多个本机 Git 项目中分别启动任务，并依据 Codex 结构化事件跟踪完成情况"
+        action={<button className="button secondary" onClick={() => { void refreshStatus(); void refreshProjects(); void refreshTasks(); }}>刷新</button>}
+      />
+      <ErrorBanner message={statusError ?? projectsError ?? taskError} retry={() => { void refreshStatus(); void refreshProjects(); void refreshTasks(); }} />
+      <section className={`codex-readiness ${status?.state.toLowerCase() ?? "loading"}`}>
+        <span className="provider-icon codex">Co</span>
+        <div>
+          <span className="live-kicker">本机能力检测</span>
+          <h2>Codex {availability?.label ?? "检测中…"}</h2>
+          <p>{status?.message ?? "正在检查 CLI、登录状态和可执行入口…"}</p>
+          {status?.version && <small>{status.version}</small>}
+        </div>
+        {availability && <span className={`badge ${availability.tone}`}>{availability.label}</span>}
+      </section>
+
+      <section className="codex-layout">
+        <div className="codex-project-column">
+          <SectionTitle title="目标项目" action={<span className="muted">已选 {selectedProjects.length} / 8</span>} />
+          <div className="codex-project-list">
+            {projects.map((project) => (
+              <label className={`codex-project-card ${selectedProjects.includes(project.id) ? "selected" : ""}`} key={project.id}>
+                <input
+                  type="checkbox"
+                  checked={selectedProjects.includes(project.id)}
+                  onChange={() => toggleProject(project.id)}
+                />
+                <span className="codex-project-copy">
+                  <strong>{project.name}</strong>
+                  <small title={project.path}>{project.path}</small>
+                </span>
+                <button type="button" className="link-button danger" onClick={(event) => { event.preventDefault(); void removeProject(project); }}>移除</button>
+              </label>
+            ))}
+            {!projectsLoading && !projects.length && <EmptyState title="还没有 Codex 项目" description="登记本机 Git 项目后，才可向受信任目录下达任务。" />}
+          </div>
+          <form className="codex-project-form" onSubmit={(event) => void addProject(event)}>
+            <h3>登记本机项目</h3>
+            <label><span>项目名称</span><input maxLength={80} value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="例如 AI 任务中控台" /></label>
+            <label><span>Git 项目目录</span><input value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="/Users/me/code/project 或 C:\code\project" /><small>目录会规范化并验证为 Git 工作区；运行接口只接受登记后的项目 ID。</small></label>
+            <button className="button secondary full" disabled={savingProject}>{savingProject ? "正在验证…" : "登记并选中"}</button>
+          </form>
+        </div>
+
+        <form className="codex-run-form" onSubmit={(event) => void startRuns(event)}>
+          <div><h2>分配新任务</h2><p>选择多个项目时，每个项目创建独立会话、独立状态和独立完成证据，不共享工作目录。</p></div>
+          <label><span>任务名称</span><input maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：检查项目测试与构建状态" /></label>
+          <label><span>任务内容</span><textarea rows={9} maxLength={32 * 1024} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="明确说明目标、限制条件和验收方式。" /><small>任务原文只通过标准输入发送给本机 Codex，不写入任务事件或通知；任务账本仅保留名称和脱敏结果摘要。</small></label>
+          <div className="form-row">
+            <label><span>执行超时</span><select value={timeoutSeconds} onChange={(event) => setTimeoutSeconds(Number(event.target.value) as 3600 | 7200 | 10800)}><option value={3600}>1 小时（默认）</option><option value={7200}>2 小时</option><option value={10800}>3 小时</option></select></label>
+            <label><span>沙箱权限</span><select value={sandbox} onChange={(event) => setSandbox(event.target.value as "read-only" | "workspace-write")}><option value="read-only">只读分析</option><option value="workspace-write">允许修改项目</option></select></label>
+          </div>
+          <div className="security-note"><strong>安全边界</strong><p>首版不提供 danger-full-access，不自动批准敏感动作；中控台超时会终止对应 Codex 子进程。</p></div>
+          {formError && <p className="form-error" role="alert">{formError}</p>}
+          {notice && <p className="inline-notice success-notice">{notice}</p>}
+          <button className="button full" disabled={submitting || status?.state !== "READY" || !selectedProjects.length}>{submitting ? "正在为各项目创建会话…" : `分配到 ${selectedProjects.length || 0} 个项目`}</button>
+        </form>
+      </section>
+
+      <SectionTitle title="已分配的 Codex 任务" action={<button className="link-button" onClick={() => void refreshTasks()}>刷新任务</button>} />
+      <section className="task-list">
+        <div className="list-summary"><span>{tasksLoading ? "读取中…" : `${taskData?.items.length ?? 0} 个任务`}</span><span>{selectedProjects.length ? `筛选 ${selectedProjects.length} 个项目` : "全部已登记项目"}</span></div>
+        {taskData?.items.map((task) => <TaskCard key={task.id} task={task} />)}
+        {!tasksLoading && !taskData?.items.length && <EmptyState title="暂无已分配任务" description="选择项目并分配任务后，运行状态和完成证据会显示在这里。" />}
+      </section>
+    </AppShell>
+  );
+}
+
 function IntegrationsPage() {
   const loader = useCallback(() => api.diagnostics(), []);
   const { data, error, loading, refresh } = usePolling<DiagnosticsData>(loader, 15_000);
@@ -788,6 +955,7 @@ function NotFoundPage() {
 }
 
 function AuthenticatedApp() {
+  const session = useSession();
   return (
     <Routes>
       <Route path="/" element={<DashboardPage />} />
@@ -795,6 +963,7 @@ function AuthenticatedApp() {
       <Route path="/tasks/:id" element={<TaskDetailPage />} />
       <Route path="/tasks/:id/continue" element={<ContinueTaskPage />} />
       <Route path="/devices" element={<DevicesPage />} />
+      <Route path="/codex" element={session.mode === "LOCAL" ? <CodexAssignmentPage /> : <Navigate to="/" replace />} />
       <Route path="/integrations" element={<IntegrationsPage />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>

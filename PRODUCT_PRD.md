@@ -152,6 +152,7 @@ DISCOVERED -> QUEUED -> RUNNING -> SUCCEEDED
 ### 8.2 P1：稳定版
 
 - 中央控制台、多设备实时同步和远程命令；
+- 中央待办列表：可先创建待分配待办，也可显式指派一台设备并启动新的托管 AI 任务；执行超时默认 1 小时，可选 1/2/3 小时；
 - Codex App Server 的 `thread/resume`、`turn/start`、`turn/steer`；
 - Claude CLI/SDK 托管会话恢复；
 - Cursor Cloud Agents v1 适配与忙碌重试；
@@ -437,6 +438,7 @@ DISCOVERED -> QUEUED -> RUNNING -> SUCCEEDED
 
 ## 19. 关联文档
 
+- [TODO_TASK_DESIGN.md](TODO_TASK_DESIGN.md)：中央待办、单机执行、跨端界面、调度协议与验收设计
 - [AI_TASK_RPA_FEASIBILITY.md](AI_TASK_RPA_FEASIBILITY.md)：技术可行性和真实 PoC
 - [TECHNICAL_IMPLEMENTATION.md](TECHNICAL_IMPLEMENTATION.md)：技术选型、架构、接口和实施步骤
 - [TEST_PLAN.md](TEST_PLAN.md)：自动化测试、真机验证、故障注入和发布门禁

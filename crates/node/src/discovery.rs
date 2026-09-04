@@ -24,7 +24,7 @@ pub fn discover_all() -> Vec<AdapterStatus> {
 }
 
 pub fn discover_provider(provider: Provider) -> AdapterStatus {
-    let executable = candidates(provider).into_iter().find(|path| path.is_file());
+    let executable = executable_candidates(provider).into_iter().next();
     let running = process_running(provider);
     let version = executable.as_ref().and_then(version_of);
     let install_state = match (&executable, running) {
@@ -55,7 +55,7 @@ pub fn discover_provider(provider: Provider) -> AdapterStatus {
     }
 }
 
-fn candidates(provider: Provider) -> Vec<PathBuf> {
+pub(crate) fn executable_candidates(provider: Provider) -> Vec<PathBuf> {
     let names: &[&str] = match provider {
         Provider::Codex => &["codex"],
         Provider::Claude => &["claude"],
@@ -114,7 +114,13 @@ fn candidates(provider: Provider) -> Vec<PathBuf> {
         };
         output.extend(fixed.iter().map(PathBuf::from));
     }
-    output
+    let mut unique = Vec::new();
+    for path in output {
+        if path.is_file() && !unique.contains(&path) {
+            unique.push(path);
+        }
+    }
+    unique
 }
 
 fn process_running(provider: Provider) -> bool {

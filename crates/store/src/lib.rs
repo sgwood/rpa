@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use aes_gcm::{
-    Aes256Gcm, Nonce,
-    aead::{Aead, AeadCore, KeyInit, OsRng},
+    Aes256Gcm, Key, Nonce,
+    aead::{Aead, Generate, KeyInit},
 };
 use ai_rpa_core::{
     AdapterStatus, Capability, CommandAction, CommandDelivery, CommandRecord, CommandState,
@@ -126,19 +126,18 @@ pub struct CryptoBox {
 impl CryptoBox {
     pub fn from_key(key: [u8; 32]) -> Self {
         Self {
-            cipher: Aes256Gcm::new((&key).into()),
+            cipher: Aes256Gcm::new(&key.into()),
         }
     }
 
     pub fn generate() -> (Self, [u8; 32]) {
-        let key = Aes256Gcm::generate_key(&mut OsRng);
-        let mut bytes = [0_u8; 32];
-        bytes.copy_from_slice(&key);
+        let key = Key::<Aes256Gcm>::generate();
+        let bytes: [u8; 32] = key.into();
         (Self::from_key(bytes), bytes)
     }
 
     pub fn encrypt(&self, plaintext: &str) -> Result<String> {
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        let nonce = Nonce::generate();
         let ciphertext = self
             .cipher
             .encrypt(&nonce, plaintext.as_bytes())
@@ -156,9 +155,10 @@ impl CryptoBox {
             bail!("encrypted command envelope is too short");
         }
         let (nonce, ciphertext) = bytes.split_at(12);
+        let nonce = Nonce::from(<[u8; 12]>::try_from(nonce).expect("length checked"));
         let plaintext = self
             .cipher
-            .decrypt(Nonce::from_slice(nonce), ciphertext)
+            .decrypt(&nonce, ciphertext)
             .map_err(|_| anyhow!("failed to decrypt command body"))?;
         String::from_utf8(plaintext).context("command body is not utf-8")
     }

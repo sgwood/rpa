@@ -1,6 +1,6 @@
 use aes_gcm::{
     Aes256Gcm, Nonce,
-    aead::{Aead, AeadCore, KeyInit, OsRng},
+    aead::{Aead, Generate, KeyInit},
 };
 use anyhow::{Context, Result, anyhow, bail};
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -24,7 +24,7 @@ impl ServerCrypto {
     }
 
     pub fn encrypt(&self, plaintext: &str) -> Result<String> {
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        let nonce = Nonce::generate();
         let ciphertext = self
             .cipher
             .encrypt(&nonce, plaintext.as_bytes())
@@ -42,9 +42,10 @@ impl ServerCrypto {
             bail!("encrypted command envelope is too short");
         }
         let (nonce, ciphertext) = bytes.split_at(12);
+        let nonce = Nonce::from(<[u8; 12]>::try_from(nonce).expect("length checked"));
         let plaintext = self
             .cipher
-            .decrypt(Nonce::from_slice(nonce), ciphertext)
+            .decrypt(&nonce, ciphertext)
             .map_err(|_| anyhow!("failed to decrypt remote command"))?;
         String::from_utf8(plaintext).context("remote command is not UTF-8")
     }
